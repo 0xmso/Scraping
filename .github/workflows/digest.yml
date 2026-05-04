@@ -1,0 +1,28 @@
+name: Daily Tech Digest
+
+on:
+  schedule:
+    - cron: "0 5 * * *"   # 08:00 Türkiye (UTC+3)
+  workflow_dispatch:        # Manuel tetikleme (test için)
+
+jobs:
+  run-digest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install feedparser notion-client httpx python-dotenv
+
+      - name: Run digest
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+        run: python run_digest.py
