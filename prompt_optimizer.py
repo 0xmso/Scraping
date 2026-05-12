@@ -28,15 +28,23 @@ Mevcut promptu ve feedback örneklerini alacaksın. Şunlara dikkat et:
 Formatı koru: JSON çıktı talimatı ve tüm kategoriler eksiksiz kalsın."""
 
 
-def _get_notion_feedback(notion: Client, db_id: str) -> list[dict]:
-    """Fetch pages with feedback from the last LOOKBACK_DAYS days."""
+def _get_articles_db_id() -> str:
+    db_id = os.environ.get("NOTION_ARTICLES_DB_ID")
+    if not db_id:
+        raise RuntimeError("NOTION_ARTICLES_DB_ID environment variable is not set.")
+    return db_id
+
+
+def _get_notion_feedback(notion: Client) -> list[dict]:
+    """Fetch article rows with feedback from the Articles database (last LOOKBACK_DAYS)."""
     since = (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).isoformat()
+    articles_db_id = _get_articles_db_id()
     results = []
     cursor = None
 
     while True:
         kwargs = {
-            "database_id": db_id,
+            "database_id": articles_db_id,
             "filter": {
                 "and": [
                     {"property": "Feedback", "select": {"is_not_empty": True}},
@@ -59,13 +67,14 @@ def _get_notion_feedback(notion: Client, db_id: str) -> list[dict]:
 
 
 def _extract_feedback_items(pages: list[dict]) -> list[dict]:
-    """Parse Notion pages into structured feedback dicts."""
+    """Parse Articles database rows into structured feedback dicts."""
     items = []
     for page in pages:
         props = page.get("properties", {})
 
-        title_prop = props.get("title", {}).get("title", [])
-        title = title_prop[0]["plain_text"] if title_prop else "(başlık yok)"
+        # Title is in "Name" property in Articles DB
+        name_prop = props.get("Name", {}).get("title", [])
+        title = name_prop[0]["plain_text"] if name_prop else "(başlık yok)"
 
         feedback_prop = props.get("Feedback", {}).get("select")
         feedback = feedback_prop["name"] if feedback_prop else None
@@ -73,15 +82,26 @@ def _extract_feedback_items(pages: list[dict]) -> list[dict]:
         note_prop = props.get("Feedback Notu", {}).get("rich_text", [])
         note = note_prop[0]["plain_text"] if note_prop else ""
 
+        # Also grab scores and signal for richer context
+        signal = props.get("Signal", {}).get("select", {})
+        signal_name = signal.get("name", "") if signal else ""
+        total_score = props.get("Total Score", {}).get("number", 0)
+
         if feedback:
-            items.append({"title": title, "feedback": feedback, "note": note})
+            items.append({
+                "title": title,
+                "feedback": feedback,
+                "note": note,
+                "signal": signal_name,
+                "total_score": total_score,
+            })
 
     return items
 
 
 def _build_optimizer_prompt(current_prompt: str, feedback_items: list[dict]) -> str:
     feedback_block = "\n".join(
-        f"- [{item['feedback']}] \"{item['title']}\""
+        f"- [{item['feedback']}] \"{item['title']}\" (Skor: {item['total_score']}, {item['signal']})"
         + (f"\n  Not: {item['note']}" if item["note"] else "")
         for item in feedback_items
     )
@@ -116,9 +136,9 @@ def run_optimization() -> str:
     current_prompt = PROMPT_FILE.read_text(encoding="utf-8")
     print(f"📄 Mevcut prompt yüklendi ({len(current_prompt)} karakter)")
 
-    # 2. Fetch feedback from Notion
-    print("📥 Notion'dan feedback'ler okunuyor...")
-    pages = _get_notion_feedback(notion, db_id)
+    # 2. Fetch feedback from Articles database
+    print("📥 Articles tablosundan feedback'ler okunuyor...")
+    pages = _get_notion_feedback(notion)
     items = _extract_feedback_items(pages)
     print(f"   {len(items)} feedback kaydı bulundu.")
 
