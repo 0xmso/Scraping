@@ -1,0 +1,40 @@
+name: Prompt Optimizer
+
+on:
+  schedule:
+    - cron: "0 0 * * 1"   # Pazartesi 03:00 TSİ (00:00 UTC)
+    - cron: "0 0 * * 4"   # Perşembe 03:00 TSİ (00:00 UTC)
+  workflow_dispatch:
+
+jobs:
+  optimize-prompt:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install anthropic notion-client python-dotenv
+
+      - name: Run prompt optimizer
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+        run: python prompt_optimizer.py
+
+      - name: Commit updated prompt
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add system_prompt.txt
+          git diff --cached --quiet || git commit -m "chore: auto-update system_prompt.txt from feedback [skip ci]"
+          git push

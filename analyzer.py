@@ -21,6 +21,7 @@ import json
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import anthropic
@@ -35,33 +36,14 @@ THRESHOLD_KRITIK = 200
 THRESHOLD_YUKSEK = 120
 THRESHOLD_ORTA = 70
 
-SYSTEM_PROMPT = """Sen bir bankanın inovasyon ekibi için çalışan stratejik teknoloji analistisin.
-Görevin: verilen haber başlığı ve özetini okuyup 5 kategoride puanlayarak Türkçe analiz üretmek.
+_PROMPT_FILE = Path(__file__).parent / "system_prompt.txt"
 
-PUANLAMA KATEGORİLERİ (her biri 0-10):
-A = Yapay Zeka & LLM (yeni modeller, agentic AI, AI araçları, AI altyapısı)
-B = Fintech & Ödeme Sistemleri (embedded finance, anlık ödeme, BNPL, neobank, RegTech, açık bankacılık)
-C = Startup Funding / M&A / IPO ($10M+ yatırım, satın alma, halka arz, unicorn)
-D = Kripto & Web3 (stablecoin, CBDC, tokenizasyon, kurumsal blockchain)
-E = Genel Tech & Big Tech (Apple/Google/Meta/Amazon/Microsoft ürün lansmanları)
 
-KURALLAR:
-- 0 = hiç alakası yok, 10 = o kategorinin tam kalbinde
-- Spekülatif/söylenti haberler için tüm puanları 3'ün altında tut
-- Somut veri (miktar, kullanıcı sayısı, metrik) içeren haberlere daha yüksek puan ver
-
-ÇIKTI: Aşağıdaki JSON formatında yanıt ver, başka metin ekleme:
-{
-  "score_a": <int 0-10>,
-  "score_b": <int 0-10>,
-  "score_c": <int 0-10>,
-  "score_d": <int 0-10>,
-  "score_e": <int 0-10>,
-  "ozet": "<3-4 cümle Türkçe özet: kim, ne yaptı, hangi ölçekte, hangi bağlamda — sayılarla destekle>",
-  "neden_onemli_sektorel": "<1-2 cümle: teknoloji/finans/inovasyon ekosistemi için ne anlama geliyor>",
-  "neden_onemli_bankacilik": "<1-2 cümle: banka kurumu için fırsat, tehdit veya öğrenme noktası>",
-  "stratejik_cikarim": "<TEK cümle: 'Bu yüzden X yapmalıyız' veya 'Bu nedenle Y izlenmeli' formatında>"
-}"""
+def _load_system_prompt() -> str:
+    """Load prompt from file; fall back to a minimal default if file is missing."""
+    if _PROMPT_FILE.exists():
+        return _PROMPT_FILE.read_text(encoding="utf-8").strip()
+    raise FileNotFoundError(f"system_prompt.txt bulunamadı: {_PROMPT_FILE}")
 
 
 @dataclass
@@ -107,13 +89,13 @@ def _signal_level(total: float) -> str:
     return "⚫ DÜŞÜK"
 
 
-def _analyze_single(client: anthropic.Anthropic, article: RawArticle) -> dict:
+def _analyze_single(client: anthropic.Anthropic, article: RawArticle, system_prompt: str) -> dict:
     """Call Claude for one article. Returns parsed JSON dict."""
     user_msg = f"Başlık: {article.title}\n\nKaynak Özeti: {article.summary or '(özet yok)'}"
     response = client.messages.create(
         model="claude-opus-4-5",
         max_tokens=800,
-        system=SYSTEM_PROMPT,
+        system=system_prompt,
         messages=[{"role": "user", "content": user_msg}],
     )
     raw_text = response.content[0].text.strip()
@@ -137,12 +119,14 @@ def analyze_articles(
         raise RuntimeError("ANTHROPIC_API_KEY environment variable is not set.")
 
     client = anthropic.Anthropic(api_key=api_key)
+    system_prompt = _load_system_prompt()
+    print(f"   Prompt yüklendi: {_PROMPT_FILE.name} ({len(system_prompt)} karakter)")
     scored: list[ScoredArticle] = []
 
     for i, art in enumerate(raw_articles, 1):
         print(f"  [{i}/{len(raw_articles)}] Analiz ediliyor: {art.title[:70]}...")
         try:
-            data = _analyze_single(client, art)
+            data = _analyze_single(client, art, system_prompt)
             a, b, c, d, e = (
                 int(data.get("score_a", 0)),
                 int(data.get("score_b", 0)),
