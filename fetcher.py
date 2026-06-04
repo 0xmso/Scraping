@@ -13,6 +13,7 @@ FEEDS = [
     "https://www.coindesk.com/arc/outboundfeeds/rss/",
     "https://feeds.feedburner.com/venturebeat/SZYF",
     "https://www.theinformation.com/feed",
+    "https://upcorn.co/feed/",
 ]
 
 # Light pre-filter — keeps articles with at least one of these signals
