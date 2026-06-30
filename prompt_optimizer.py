@@ -11,10 +11,11 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import anthropic
-from notion_client import Client
+import httpx
 
 PROMPT_FILE = Path(__file__).parent / "system_prompt.txt"
 LOOKBACK_DAYS = 30
+NOTION_VERSION = "2022-06-28"
 
 OPTIMIZER_SYSTEM = """Sen bir prompt mühendisisin. Görevin: bir haber kürasyon sisteminin
 puanlama promptunu, kullanıcı feedback'lerine dayanarak iyileştirmek.
@@ -35,33 +36,45 @@ def _get_articles_db_id() -> str:
     return db_id
 
 
-def _get_notion_feedback(notion: Client) -> list[dict]:
-    """Fetch article rows with feedback from the Articles database (last LOOKBACK_DAYS)."""
+def _get_notion_feedback(token: str) -> list[dict]:
+    """Fetch article rows with feedback from the Articles database (last LOOKBACK_DAYS).
+
+    Uses the Notion REST API directly (httpx) since notion-client 3.x removed
+    databases.query.
+    """
     since = (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).isoformat()
     articles_db_id = _get_articles_db_id()
+    url = f"https://api.notion.com/v1/databases/{articles_db_id}/query"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Notion-Version": NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
     results = []
     cursor = None
 
-    while True:
-        kwargs = {
-            "database_id": articles_db_id,
-            "filter": {
-                "and": [
-                    {"property": "Feedback", "select": {"is_not_empty": True}},
-                    {"timestamp": "created_time", "created_time": {"after": since}},
-                ]
-            },
-            "page_size": 100,
-        }
-        if cursor:
-            kwargs["start_cursor"] = cursor
+    with httpx.Client(timeout=30) as client:
+        while True:
+            body = {
+                "filter": {
+                    "and": [
+                        {"property": "Feedback", "select": {"is_not_empty": True}},
+                        {"timestamp": "created_time", "created_time": {"after": since}},
+                    ]
+                },
+                "page_size": 100,
+            }
+            if cursor:
+                body["start_cursor"] = cursor
 
-        response = notion.databases.query(**kwargs)
-        results.extend(response["results"])
+            resp = client.post(url, headers=headers, json=body)
+            resp.raise_for_status()
+            data = resp.json()
+            results.extend(data.get("results", []))
 
-        if not response.get("has_more"):
-            break
-        cursor = response["next_cursor"]
+            if not data.get("has_more"):
+                break
+            cursor = data.get("next_cursor")
 
     return results
 
@@ -129,7 +142,6 @@ def run_optimization() -> str:
     if not all([api_key, notion_token, db_id]):
         raise RuntimeError("ANTHROPIC_API_KEY, NOTION_TOKEN veya NOTION_DATABASE_ID eksik.")
 
-    notion = Client(auth=notion_token)
     client = anthropic.Anthropic(api_key=api_key)
 
     # 1. Read current prompt
@@ -138,7 +150,7 @@ def run_optimization() -> str:
 
     # 2. Fetch feedback from Articles database
     print("📥 Articles tablosundan feedback'ler okunuyor...")
-    pages = _get_notion_feedback(notion)
+    pages = _get_notion_feedback(notion_token)
     items = _extract_feedback_items(pages)
     print(f"   {len(items)} feedback kaydı bulundu.")
 

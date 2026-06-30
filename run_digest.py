@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent / ".env")
 
 from fetcher import fetch_raw_articles
+from dedup import filter_new_articles
 from analyzer import analyze_articles
 from notion_writer import create_digest_page
 
@@ -27,6 +28,15 @@ def main():
 
     if not raw_articles:
         print("Hiç aday haber bulunamadı.")
+        return
+
+    # ── 1.5. Tekrar kontrolü — geçmişte gönderilmiş haberleri ele ─────────────
+    print("🔁 Geçmişte gönderilen haberler kontrol ediliyor...")
+    raw_articles, skipped = filter_new_articles(raw_articles)
+    print(f"   {skipped} tekrar elendi · {len(raw_articles)} yeni aday kaldı\n")
+
+    if not raw_articles:
+        print("Tüm adaylar daha önce gönderilmiş — yeni haber yok.")
         return
 
     # ── 2. Analyze ────────────────────────────────────────────────────────────
