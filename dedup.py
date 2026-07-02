@@ -1,17 +1,25 @@
 """Cross-run deduplication — prevents re-posting articles already sent.
 
-Uses the Articles Notion database as the source of truth: every article ever
-posted has a row there with its URL. Before analysis we fetch the URLs posted
-in the last LOOKBACK_DAYS and drop any candidate that matches. This both avoids
-duplicate digest entries and saves Claude API tokens (we never re-analyze a
-story we've already covered).
+Two layers, both running BEFORE Claude analysis (so duplicates cost no
+Opus tokens):
 
-URLs are normalized (scheme/host lowercased, tracking query params and trailing
-slashes stripped) so the same article arriving with different UTM tags is still
-recognized as a duplicate.
+1. URL layer — uses the Articles Notion database as the source of truth:
+   every article ever posted has a row there with its URL. Candidates whose
+   normalized URL was posted in the last LOOKBACK_DAYS are dropped.
+   URLs are normalized (host lowercased, www/utm/http-https variants
+   collapsed) so trivially-different links still match.
+
+2. Semantic layer — one cheap Haiku call compares candidate titles against
+   recently posted titles (and against each other) to catch the same story
+   arriving from a different source with a different URL, e.g. TechCrunch
+   and VentureBeat both covering the same announcement.
+
+Both layers fail open: if Notion or the Anthropic API is unreachable, all
+candidates pass rather than blocking the digest.
 """
 
 import os
+import json
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
@@ -19,8 +27,10 @@ import httpx
 
 from fetcher import RawArticle
 
-LOOKBACK_DAYS = 30
+LOOKBACK_DAYS = 30            # URL-level memory window
+SEMANTIC_LOOKBACK_DAYS = 10   # title window for the semantic check (keeps tokens low)
 NOTION_VERSION = "2022-06-28"
+SEMANTIC_MODEL = "claude-haiku-4-5"
 
 # Query params that never identify the article itself — strip before comparing.
 _TRACKING_PREFIXES = ("utm_", "fbclid", "gclid", "mc_", "ref", "ref_", "source")
@@ -56,13 +66,15 @@ def _get_articles_db_id() -> str:
     return db_id
 
 
-def fetch_seen_urls(token: str) -> set[str]:
-    """Return the normalized URLs of articles posted in the last LOOKBACK_DAYS.
+def fetch_seen(token: str) -> tuple[set[str], list[str]]:
+    """Return (normalized URLs of last LOOKBACK_DAYS, titles of last SEMANTIC_LOOKBACK_DAYS).
 
     Uses the Notion REST API directly (httpx) rather than the SDK, since
     notion-client 3.x removed databases.query.
     """
-    since = (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).isoformat()
+    now = datetime.now(timezone.utc)
+    since_urls = (now - timedelta(days=LOOKBACK_DAYS)).isoformat()
+    since_titles = now - timedelta(days=SEMANTIC_LOOKBACK_DAYS)
     articles_db_id = _get_articles_db_id()
     url = f"https://api.notion.com/v1/databases/{articles_db_id}/query"
     headers = {
@@ -70,13 +82,14 @@ def fetch_seen_urls(token: str) -> set[str]:
         "Notion-Version": NOTION_VERSION,
         "Content-Type": "application/json",
     }
-    seen: set[str] = set()
+    seen_urls: set[str] = set()
+    seen_titles: list[str] = []
     cursor = None
 
     with httpx.Client(timeout=30) as client:
         while True:
             body = {
-                "filter": {"timestamp": "created_time", "created_time": {"after": since}},
+                "filter": {"timestamp": "created_time", "created_time": {"after": since_urls}},
                 "page_size": 100,
             }
             if cursor:
@@ -87,21 +100,119 @@ def fetch_seen_urls(token: str) -> set[str]:
             data = resp.json()
 
             for page in data.get("results", []):
-                art_url = page.get("properties", {}).get("URL", {}).get("url")
+                props = page.get("properties", {})
+                art_url = props.get("URL", {}).get("url")
                 if art_url:
-                    seen.add(normalize_url(art_url))
+                    seen_urls.add(normalize_url(art_url))
+
+                created = page.get("created_time", "")
+                try:
+                    created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                except ValueError:
+                    created_dt = None
+                if created_dt and created_dt >= since_titles:
+                    title_prop = props.get("Name", {}).get("title", [])
+                    if title_prop:
+                        seen_titles.append(title_prop[0]["plain_text"])
 
             if not data.get("has_more"):
                 break
             cursor = data.get("next_cursor")
 
-    return seen
+    return seen_urls, seen_titles
+
+
+# Backwards-compatible alias (older callers/tests used this name)
+def fetch_seen_urls(token: str) -> set[str]:
+    return fetch_seen(token)[0]
+
+
+_SEMANTIC_SYSTEM = """Sen bir haber tekrar dedektörüsün. Sana iki liste verilecek:
+1. Son günlerde ZATEN YAYINLANMIŞ haber başlıkları
+2. Numaralı ADAY haber başlıkları
+
+Bir aday şu iki durumdan birine uyuyorsa TEKRAR sayılır:
+- Zaten yayınlanmış bir haberle AYNI OLAYI anlatıyor (farklı kaynak/farklı ifade olsa bile)
+- Listede kendinden önce gelen başka bir adayla aynı olayı anlatıyor
+
+DİKKAT: Aynı konudaki YENİ GELİŞME tekrar değildir. Örneğin "X şirketi yatırım görüşmelerinde"
+yayınlandıysa, "X şirketi yatırımı tamamladı" yeni gelişmedir, elenmez. Sadece aynı olayın
+farklı kaynaktan/farklı ifadeyle tekrarını ele.
+
+Sadece JSON döndür: tekrar olan adayların numaraları."""
+
+_SEMANTIC_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "duplicate_indices": {
+            "type": "array",
+            "items": {"type": "integer"},
+        },
+    },
+    "required": ["duplicate_indices"],
+    "additionalProperties": False,
+}
+
+
+def semantic_filter(
+    articles: list[RawArticle], seen_titles: list[str]
+) -> tuple[list[RawArticle], int]:
+    """Drop candidates that cover the same story as an already-posted article
+    (or as an earlier candidate in the same batch), using one cheap Haiku call.
+
+    Returns (fresh_articles, skipped_count). Fails open on any error.
+    """
+    if not articles:
+        return articles, 0
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("   [WARN] ANTHROPIC_API_KEY yok — semantik tekrar kontrolü atlandı.")
+        return articles, 0
+
+    try:
+        import anthropic
+
+        seen_block = "\n".join(f"- {t}" for t in seen_titles) or "(yok)"
+        cand_block = "\n".join(f"{i}. {a.title}" for i, a in enumerate(articles, 1))
+        user_msg = (
+            f"ZATEN YAYINLANMIŞ HABERLER (son {SEMANTIC_LOOKBACK_DAYS} gün):\n{seen_block}\n\n"
+            f"ADAY HABERLER:\n{cand_block}"
+        )
+
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model=SEMANTIC_MODEL,
+            max_tokens=500,
+            system=_SEMANTIC_SYSTEM,
+            output_config={
+                "format": {"type": "json_schema", "schema": _SEMANTIC_SCHEMA}
+            },
+            messages=[{"role": "user", "content": user_msg}],
+        )
+        raw = response.content[0].text.strip()
+        raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+        dup_indices = set(json.loads(raw)["duplicate_indices"])
+    except Exception as exc:
+        print(f"   [WARN] Semantik tekrar kontrolü başarısız ({exc}) — tüm adaylar geçiyor.")
+        return articles, 0
+
+    fresh: list[RawArticle] = []
+    skipped = 0
+    for i, art in enumerate(articles, 1):
+        if i in dup_indices:
+            skipped += 1
+            print(f"   ↻ semantik tekrar elendi: {art.title[:65]}")
+        else:
+            fresh.append(art)
+
+    return fresh, skipped
 
 
 def filter_new_articles(
     raw_articles: list[RawArticle],
 ) -> tuple[list[RawArticle], int]:
-    """Drop candidates already posted in the last LOOKBACK_DAYS.
+    """Drop candidates already posted (by URL) or already covered (by story).
 
     Returns (fresh_articles, skipped_count). Fails open — if Notion is
     unreachable, returns all articles rather than blocking the digest.
@@ -112,17 +223,23 @@ def filter_new_articles(
         return raw_articles, 0
 
     try:
-        seen = fetch_seen_urls(token)
+        seen_urls, seen_titles = fetch_seen(token)
     except Exception as exc:
         print(f"   [WARN] Tekrar kontrolü başarısız ({exc}) — tüm adaylar geçiyor.")
         return raw_articles, 0
 
+    # Layer 1 — exact URL match
     fresh: list[RawArticle] = []
-    skipped = 0
+    url_skipped = 0
     for art in raw_articles:
-        if normalize_url(art.url) in seen:
-            skipped += 1
+        if normalize_url(art.url) in seen_urls:
+            url_skipped += 1
         else:
             fresh.append(art)
+    if url_skipped:
+        print(f"   {url_skipped} aday URL eşleşmesiyle elendi")
 
-    return fresh, skipped
+    # Layer 2 — same story, different source/URL
+    fresh, semantic_skipped = semantic_filter(fresh, seen_titles)
+
+    return fresh, url_skipped + semantic_skipped
