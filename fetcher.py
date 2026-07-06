@@ -9,12 +9,20 @@ from typing import Optional
 FEEDS = [
     "https://techcrunch.com/feed/",
     "https://feeds.feedburner.com/TechCrunchIT",
+    "https://www.finextra.com/rss/headlines.aspx",
     "https://hnrss.org/frontpage",
-    "https://www.coindesk.com/arc/outboundfeeds/rss/",
+    "https://www.coindesk.com/arc/outboundfeeds/rss",
     "https://feeds.feedburner.com/venturebeat/SZYF",
     "https://www.theinformation.com/feed",
     "https://upcorn.co/feed/",
 ]
+
+# Max candidates a single feed may contribute per run, so no single source
+# floods the digest. CoinDesk is capped tighter to keep crypto's share low.
+DEFAULT_FEED_CAP = 12
+FEED_CAPS = {
+    "coindesk.com": 3,
+}
 
 # Light pre-filter — keeps articles with at least one of these signals
 # to avoid sending 100% noise to Claude API
@@ -22,7 +30,9 @@ PRE_FILTER_KEYWORDS = [
     "ai", "llm", "gpt", "claude", "gemini", "openai", "anthropic",
     "machine learning", "neural", "artificial intelligence", "agent",
     "mistral", "llama", "generative", "model",
-    "fintech", "payment", "banking", "neobank", "stripe", "visa",
+    "fintech", "payment", "payments", "banking", "bank", "banks",
+    "neobank", "stripe", "visa", "mastercard", "paypal", "klarna",
+    "revolut", "wise", "fraud", "lending", "wallet", "regtech",
     "funding", "raises", "acquisition", "ipo", "series", "unicorn",
     "startup", "invest", "merger", "valuation",
     "crypto", "bitcoin", "ethereum", "blockchain", "web3", "stablecoin",
@@ -77,6 +87,11 @@ def fetch_raw_articles(max_candidates: int = 40) -> tuple[list[RawArticle], int]
     total_scanned = 0
 
     for feed_url in FEEDS:
+        feed_cap = next(
+            (cap for domain, cap in FEED_CAPS.items() if domain in feed_url),
+            DEFAULT_FEED_CAP,
+        )
+        feed_count = 0
         try:
             feed = feedparser.parse(feed_url)
             source = feed.feed.get("title", feed_url)
@@ -103,8 +118,9 @@ def fetch_raw_articles(max_candidates: int = 40) -> tuple[list[RawArticle], int]
                         source=source,
                     )
                 )
+                feed_count += 1
 
-                if len(candidates) >= max_candidates:
+                if feed_count >= feed_cap or len(candidates) >= max_candidates:
                     break
             if len(candidates) >= max_candidates:
                 break
