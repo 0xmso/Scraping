@@ -19,10 +19,13 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install feedparser notion-client anthropic python-dotenv
+        run: pip install feedparser notion-client 'anthropic[bedrock]>=0.125' python-dotenv
 
       - name: Run digest
         env:
+          # Amazon Bedrock (AWS credits). Falls back to ANTHROPIC_API_KEY if unset.
+          AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.AWS_BEARER_TOKEN_BEDROCK }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
