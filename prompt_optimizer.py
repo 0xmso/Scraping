@@ -10,8 +10,9 @@ import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-import anthropic
 import httpx
+
+import llm
 
 PROMPT_FILE = Path(__file__).parent / "system_prompt.txt"
 LOOKBACK_DAYS = 30
@@ -135,14 +136,16 @@ Bu feedback'lere dayanarak promptu güncelle. Özellikle:
 
 
 def run_optimization() -> str:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
     notion_token = os.environ.get("NOTION_TOKEN")
     db_id = os.environ.get("NOTION_DATABASE_ID")
 
-    if not all([api_key, notion_token, db_id]):
-        raise RuntimeError("ANTHROPIC_API_KEY, NOTION_TOKEN veya NOTION_DATABASE_ID eksik.")
+    if not llm.has_credentials():
+        raise RuntimeError("AWS_BEARER_TOKEN_BEDROCK veya ANTHROPIC_API_KEY eksik.")
+    if not all([notion_token, db_id]):
+        raise RuntimeError("NOTION_TOKEN veya NOTION_DATABASE_ID eksik.")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.get_client()
+    print(f"🔌 Backend: {llm.backend_name()}")
 
     # 1. Read current prompt
     current_prompt = PROMPT_FILE.read_text(encoding="utf-8")
@@ -168,13 +171,18 @@ def run_optimization() -> str:
     user_msg = _build_optimizer_prompt(current_prompt, items)
 
     response = client.messages.create(
-        model="claude-opus-4-5",
+        model=llm.model("deep"),
         max_tokens=2000,
         system=OPTIMIZER_SYSTEM,
         messages=[{"role": "user", "content": user_msg}],
     )
 
-    new_prompt = response.content[0].text.strip()
+    # Scan for the text block — a thinking block can come first.
+    new_prompt = next(
+        (b.text for b in response.content if getattr(b, "type", None) == "text"), ""
+    ).strip()
+    if not new_prompt:
+        raise RuntimeError("Model boş prompt döndürdü — güncelleme yapılmadı.")
 
     # 4. Save updated prompt
     PROMPT_FILE.write_text(new_prompt, encoding="utf-8")

@@ -25,12 +25,13 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 import httpx
 
+import llm
 from fetcher import RawArticle
 
 LOOKBACK_DAYS = 30            # URL-level memory window
 SEMANTIC_LOOKBACK_DAYS = 10   # title window for the semantic check (keeps tokens low)
 NOTION_VERSION = "2022-06-28"
-SEMANTIC_MODEL = "claude-haiku-4-5"
+SEMANTIC_TIER = "fast"        # cheap model; resolved per backend in llm.py
 
 # Query params that never identify the article itself — strip before comparing.
 _TRACKING_PREFIXES = ("utm_", "fbclid", "gclid", "mc_", "ref", "ref_", "source")
@@ -165,14 +166,11 @@ def semantic_filter(
     if not articles:
         return articles, 0
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        print("   [WARN] ANTHROPIC_API_KEY yok — semantik tekrar kontrolü atlandı.")
+    if not llm.has_credentials():
+        print("   [WARN] Model kimlik bilgisi yok — semantik tekrar kontrolü atlandı.")
         return articles, 0
 
     try:
-        import anthropic
-
         seen_block = "\n".join(f"- {t}" for t in seen_titles) or "(yok)"
         cand_block = "\n".join(f"{i}. {a.title}" for i, a in enumerate(articles, 1))
         user_msg = (
@@ -180,9 +178,9 @@ def semantic_filter(
             f"ADAY HABERLER:\n{cand_block}"
         )
 
-        client = anthropic.Anthropic(api_key=api_key)
+        client = llm.get_client()
         response = client.messages.create(
-            model=SEMANTIC_MODEL,
+            model=llm.model(SEMANTIC_TIER),
             max_tokens=500,
             system=_SEMANTIC_SYSTEM,
             output_config={
@@ -190,7 +188,11 @@ def semantic_filter(
             },
             messages=[{"role": "user", "content": user_msg}],
         )
-        raw = response.content[0].text.strip()
+        # Scan for the text block — a thinking block can come first.
+        text = next(
+            (b.text for b in response.content if getattr(b, "type", None) == "text"), ""
+        )
+        raw = text.strip()
         raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         dup_indices = set(json.loads(raw)["duplicate_indices"])
     except Exception as exc:

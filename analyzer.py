@@ -27,13 +27,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import anthropic
-
+import llm
 from fetcher import RawArticle
 
 # ── Models ────────────────────────────────────────────────────────────────────
-STAGE1_MODEL = "claude-haiku-4-5"   # cheap pre-filter (5× cheaper than Opus)
-STAGE2_MODEL = "claude-opus-4-7"    # deep analysis only on passing articles
+# Resolved per backend (Bedrock vs first-party) — see llm.py.
+STAGE1_TIER = "fast"   # cheap pre-filter (Haiku)
+STAGE2_TIER = "deep"   # deep analysis only on passing articles (Opus)
 
 # ── Scoring constants ─────────────────────────────────────────────────────────
 WEIGHTS = {"A": 10, "B": 10, "C": 8, "D": 6, "E": 5}
@@ -162,13 +162,23 @@ def _user_message(article: RawArticle) -> str:
 
 
 def _parse_json_response(response) -> dict:
-    """Extract JSON from the first text block, robust to optional markdown fences."""
-    raw = response.content[0].text.strip()
+    """Extract JSON from the response's first *text* block.
+
+    Must scan rather than index content[0]: with adaptive thinking the response
+    can lead with a thinking block (Opus 4.6 defaults to display="summarized"),
+    so content[0] is not necessarily the answer. Tolerates markdown fences.
+    """
+    text = next(
+        (b.text for b in response.content if getattr(b, "type", None) == "text"), None
+    )
+    if text is None:
+        raise ValueError("Yanıtta metin bloğu yok")
+    raw = text.strip()
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     return json.loads(raw)
 
 
-def _quick_score(client: anthropic.Anthropic, article: RawArticle) -> dict:
+def _quick_score(client, article: RawArticle) -> dict:
     """Stage 1: Haiku call — scores only, no Turkish analysis.
 
     Note: cache_control is set on the system prompt but only activates once the
@@ -176,7 +186,7 @@ def _quick_score(client: anthropic.Anthropic, article: RawArticle) -> dict:
     means we get caching for free if the prompt grows via few-shot examples.
     """
     response = client.messages.create(
-        model=STAGE1_MODEL,
+        model=llm.model(STAGE1_TIER),
         max_tokens=200,
         system=[
             {
@@ -193,9 +203,7 @@ def _quick_score(client: anthropic.Anthropic, article: RawArticle) -> dict:
     return _parse_json_response(response)
 
 
-def _deep_analyze(
-    client: anthropic.Anthropic, article: RawArticle, system_prompt: str
-) -> dict:
+def _deep_analyze(client, article: RawArticle, system_prompt: str) -> dict:
     """Stage 2: Opus call — full Turkish analysis + final scoring.
 
     Opus re-scores too: stage-1 Haiku scores were a pre-filter, this is the
@@ -203,7 +211,7 @@ def _deep_analyze(
     that's auto-tuned by the feedback loop is used here.
     """
     response = client.messages.create(
-        model=STAGE2_MODEL,
+        model=llm.model(STAGE2_TIER),
         max_tokens=1024,
         system=[
             {
@@ -232,12 +240,10 @@ def analyze_articles(
     Stage 1: Haiku scores every candidate (cheap)
     Stage 2: Opus deep-analyzes only articles passing the safety-margin gate
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY environment variable is not set.")
-
-    client = anthropic.Anthropic(api_key=api_key)
+    client = llm.get_client()
     system_prompt = _load_system_prompt()
+    print(f"   Backend: {llm.backend_name()}")
+    print(f"   Modeller: {llm.model(STAGE1_TIER)} → {llm.model(STAGE2_TIER)}")
     print(f"   Prompt yüklendi: {_PROMPT_FILE.name} ({len(system_prompt)} karakter)")
 
     # ── Stage 1: Haiku pre-filter ────────────────────────────────────────────
