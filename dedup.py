@@ -9,7 +9,7 @@ Opus tokens):
    URLs are normalized (host lowercased, www/utm/http-https variants
    collapsed) so trivially-different links still match.
 
-2. Semantic layer — one cheap Haiku call compares candidate titles against
+2. Semantic layer — one cheap model call compares candidate titles against
    recently posted titles (and against each other) to catch the same story
    arriving from a different source with a different URL, e.g. TechCrunch
    and VentureBeat both covering the same announcement.
@@ -19,7 +19,6 @@ candidates pass rather than blocking the digest.
 """
 
 import os
-import json
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
@@ -159,7 +158,7 @@ def semantic_filter(
     articles: list[RawArticle], seen_titles: list[str]
 ) -> tuple[list[RawArticle], int]:
     """Drop candidates that cover the same story as an already-posted article
-    (or as an earlier candidate in the same batch), using one cheap Haiku call.
+    (or as an earlier candidate in the same batch), using one cheap model call.
 
     Returns (fresh_articles, skipped_count). Fails open on any error.
     """
@@ -179,22 +178,17 @@ def semantic_filter(
         )
 
         client = llm.get_client()
-        response = client.messages.create(
+        data = llm.call_structured(
+            client,
             model=llm.model(SEMANTIC_TIER),
-            max_tokens=500,
+            max_tokens=2000,
             system=_SEMANTIC_SYSTEM,
-            output_config={
-                "format": {"type": "json_schema", "schema": _SEMANTIC_SCHEMA}
-            },
-            messages=[{"role": "user", "content": user_msg}],
+            user_content=user_msg,
+            schema=_SEMANTIC_SCHEMA,
+            tool_name="tekrar_bildir",
+            tool_description="Tekrar olan adayların numaralarını döndür.",
         )
-        # Scan for the text block — a thinking block can come first.
-        text = next(
-            (b.text for b in response.content if getattr(b, "type", None) == "text"), ""
-        )
-        raw = text.strip()
-        raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        dup_indices = set(json.loads(raw)["duplicate_indices"])
+        dup_indices = set(data["duplicate_indices"])
     except Exception as exc:
         print(f"   [WARN] Semantik tekrar kontrolü başarısız ({exc}) — tüm adaylar geçiyor.")
         return articles, 0

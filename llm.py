@@ -5,19 +5,19 @@ Backend is chosen by environment, so no caller needs to know which is active:
   * otherwise                     -> first-party Claude API via ANTHROPIC_API_KEY
 
 Bedrock notes (verified against this AWS account):
-  * The Mantle client (AnthropicBedrockMantle) 404s here — that endpoint isn't
-    provisioned for the account — so we use the InvokeModel client instead.
-  * Models must be addressed by cross-region *inference profile* ID (the "us."
-    prefix). The bare "anthropic.claude-*" IDs return 403/404.
-  * Only the profiles below are granted on the account. Opus 5 / 4.7 / 4.8 and
-    the Fable family return "not available for this account" until model access
-    is enabled in the Bedrock console; when that happens, bump DEEP here.
-  * Structured outputs, output_config.effort and thinking={"type":"adaptive"}
-    all work on this path. Prompt caching must use explicit cache_control
-    breakpoints — the legacy Bedrock integration rejects top-level cache_control.
+  * Uses the Mantle client with bare "anthropic.claude-*" model IDs. The older
+    InvokeModel client + "us." inference-profile IDs also works, but only for
+    models up to Opus 4.6 — Opus 5 / Sonnet 5 are served through Mantle.
+  * thinking={"type":"adaptive"}, output_config.effort and cache_control all
+    work. Structured outputs (output_config.format) and strict tool use do NOT
+    — both return "Extra inputs are not permitted". Use call_structured()
+    below, which gets schema-shaped JSON via forced tool use instead.
+  * Schemas cannot carry minimum/maximum, so numeric ranges are prompt-enforced
+    only; clamp on the way out (models do occasionally return out-of-range).
 """
 
 import os
+from typing import Optional
 
 import anthropic
 
@@ -25,12 +25,12 @@ DEFAULT_AWS_REGION = "us-east-1"
 
 # tier -> model id, per backend
 BEDROCK_MODELS = {
-    "fast": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "deep": "us.anthropic.claude-opus-4-6-v1",
+    "fast": "anthropic.claude-sonnet-5",
+    "deep": "anthropic.claude-opus-5",
 }
 DIRECT_MODELS = {
-    "fast": "claude-haiku-4-5",
-    "deep": "claude-opus-4-7",
+    "fast": "claude-sonnet-5",
+    "deep": "claude-opus-5",
 }
 
 
@@ -63,8 +63,8 @@ def get_client():
     """
     if use_bedrock():
         region = os.environ.get("AWS_REGION", DEFAULT_AWS_REGION)
-        # AnthropicBedrock reads AWS_BEARER_TOKEN_BEDROCK from the environment.
-        return anthropic.AnthropicBedrock(aws_region=region)
+        # The client reads AWS_BEARER_TOKEN_BEDROCK from the environment.
+        return anthropic.AnthropicBedrockMantle(aws_region=region)
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -77,3 +77,49 @@ def get_client():
 def has_credentials() -> bool:
     """True when either backend is configured."""
     return use_bedrock() or bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
+def call_structured(
+    client,
+    *,
+    model: str,
+    system,
+    user_content: str,
+    schema: dict,
+    max_tokens: int,
+    tool_name: str = "sonuc",
+    tool_description: str = "Sonucu bu şemaya göre döndür.",
+    effort: Optional[str] = None,
+    thinking: bool = False,
+) -> dict:
+    """Return schema-shaped JSON from the model.
+
+    Uses forced tool use rather than output_config.format: Bedrock's current
+    models reject structured outputs, but a forced tool call gives the same
+    guarantee — the response carries a tool_use block whose .input already
+    matches the schema, with no text parsing.
+    """
+    kwargs = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "system": system,
+        "tools": [
+            {
+                "name": tool_name,
+                "description": tool_description,
+                "input_schema": schema,
+            }
+        ],
+        "tool_choice": {"type": "tool", "name": tool_name},
+        "messages": [{"role": "user", "content": user_content}],
+    }
+    if thinking:
+        kwargs["thinking"] = {"type": "adaptive"}
+    if effort:
+        kwargs["output_config"] = {"effort": effort}
+
+    response = client.messages.create(**kwargs)
+    block = next((b for b in response.content if b.type == "tool_use"), None)
+    if block is None:
+        raise ValueError(f"Yanıtta tool_use bloğu yok (stop={response.stop_reason})")
+    return block.input
