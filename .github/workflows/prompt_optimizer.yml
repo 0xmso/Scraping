@@ -42,3 +42,22 @@ jobs:
           git add system_prompt.txt
           git diff --cached --quiet || git commit -m "chore: auto-update system_prompt.txt from feedback [skip ci]"
           git push
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # One open issue at a time — reopen/comment instead of filing a new
+          # one on every failed run.
+          existing=$(gh issue list --label automation-failure --state open \
+            --search "Prompt Optimizer in:title" --json number -q '.[0].number')
+          body="Çalışma başarısız: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create \
+              --title "Prompt Optimizer başarısız oluyor" \
+              --label automation-failure \
+              --body "$body"
+          fi

@@ -31,3 +31,22 @@ jobs:
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           NOTION_ARTICLES_DB_ID: ${{ secrets.NOTION_ARTICLES_DB_ID }}
         run: python run_digest.py
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # One open issue at a time — reopen/comment instead of filing a new
+          # one on every failed run.
+          existing=$(gh issue list --label automation-failure --state open \
+            --search "Daily Tech Digest in:title" --json number -q '.[0].number')
+          body="Çalışma başarısız: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create \
+              --title "Daily Tech Digest başarısız oluyor" \
+              --label automation-failure \
+              --body "$body"
+          fi

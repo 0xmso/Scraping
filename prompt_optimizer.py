@@ -113,6 +113,53 @@ def _extract_feedback_items(pages: list[dict]) -> list[dict]:
     return items
 
 
+# Fields the digest's Stage-2 schema requires. The rewritten prompt must still
+# describe every one of them, or the model gets no instruction for a field the
+# schema silently forces it to emit.
+REQUIRED_FIELDS = (
+    "score_a", "score_b", "score_c", "score_d", "score_e",
+    "ozet", "neden_onemli_sektorel", "neden_onemli_bankacilik", "stratejik_cikarim",
+)
+MAX_PROMPT_CHARS = 12000
+
+
+class PromptRejected(Exception):
+    """Raised when a generated prompt fails validation and must not be written."""
+
+
+def validate_prompt(new_prompt: str, current_prompt: str) -> None:
+    """Reject a rewritten prompt that would degrade the digest.
+
+    Raises PromptRejected with the reason. The caller keeps the existing prompt.
+    """
+    missing = [f for f in REQUIRED_FIELDS if f not in new_prompt]
+    if missing:
+        raise PromptRejected(f"eksik alan(lar): {', '.join(missing)}")
+
+    # An unbalanced JSON block means the response was cut off mid-structure.
+    if new_prompt.count("{") != new_prompt.count("}"):
+        raise PromptRejected(
+            f"JSON blogu kapanmamis ({new_prompt.count('{')} '{{' vs "
+            f"{new_prompt.count('}')} '}}')"
+        )
+
+    # Truncation usually severs the final line mid-sentence.
+    if not new_prompt.rstrip().endswith(("}", '"', ">", ".", "]")):
+        tail = new_prompt.rstrip()[-40:]
+        raise PromptRejected(f"cumle ortasinda bitiyor: ...{tail!r}")
+
+    if len(new_prompt) > MAX_PROMPT_CHARS:
+        raise PromptRejected(
+            f"cok uzun: {len(new_prompt)} > {MAX_PROMPT_CHARS} karakter"
+        )
+
+    # A drastic shrink means the model summarized instead of rewriting.
+    if len(new_prompt) < len(current_prompt) * 0.5:
+        raise PromptRejected(
+            f"asiri kisalmis: {len(new_prompt)} < mevcut {len(current_prompt)} / 2"
+        )
+
+
 def _build_optimizer_prompt(current_prompt: str, feedback_items: list[dict]) -> str:
     feedback_block = "\n".join(
         f"- [{item['feedback']}] \"{item['title']}\" (Skor: {item['total_score']}, {item['signal']})"
@@ -172,7 +219,7 @@ def run_optimization() -> str:
 
     response = client.messages.create(
         model=llm.model("deep"),
-        max_tokens=2000,
+        max_tokens=16000,
         system=OPTIMIZER_SYSTEM,
         messages=[{"role": "user", "content": user_msg}],
     )
@@ -184,7 +231,12 @@ def run_optimization() -> str:
     if not new_prompt:
         raise RuntimeError("Model boş prompt döndürdü — güncelleme yapılmadı.")
 
-    # 4. Save updated prompt
+    # 4. Guardrails — never overwrite a working prompt with a broken one.
+    if response.stop_reason == "max_tokens":
+        raise PromptRejected("yanıt max_tokens sınırına çarptı (kesik)")
+    validate_prompt(new_prompt, current_prompt)
+
+    # 5. Save updated prompt
     PROMPT_FILE.write_text(new_prompt, encoding="utf-8")
     print(f"\n✅ system_prompt.txt güncellendi ({len(new_prompt)} karakter)")
     print(f"   Değişiklik: {len(new_prompt) - len(current_prompt):+d} karakter")
@@ -193,7 +245,16 @@ def run_optimization() -> str:
 
 
 if __name__ == "__main__":
+    import sys
     from pathlib import Path
     from dotenv import load_dotenv
+
     load_dotenv(Path(__file__).parent / ".env")
-    run_optimization()
+    try:
+        run_optimization()
+    except PromptRejected as exc:
+        # The existing prompt is untouched, so the digest keeps working — but
+        # exit non-zero so the run is flagged rather than failing silently.
+        print(f"\n❌ Üretilen prompt reddedildi: {exc}")
+        print("   Mevcut prompt korundu, dijest etkilenmedi.")
+        sys.exit(1)
