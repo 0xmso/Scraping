@@ -8,14 +8,14 @@ Scoring system:
   A — Yapay Zeka & LLM        ×10
   B — Fintech & Ödeme         ×10
   C — Startup Funding/M&A/IPO ×8
-  D — Kripto & Web3            ×6
+  D — Kripto & Web3            ×3   (deliberately low — crypto was dominating)
   E — Genel Tech & Big Tech    ×5
 
 Thresholds:
   200+  → 🔴 KRİTİK
   120-199 → 🟠 YÜKSEK
   70-119  → 🟡 ORTA
-  <70   → elenir
+  <55   → elenir (run_digest passes min_total)
 
 Cross-category bonus: 2+ categories with score ≥ 6 → ×1.25
 """
@@ -36,13 +36,13 @@ STAGE1_TIER = "fast"   # cheap pre-filter (Haiku)
 STAGE2_TIER = "deep"   # deep analysis only on passing articles (Opus)
 
 # ── Scoring constants ─────────────────────────────────────────────────────────
-WEIGHTS = {"A": 10, "B": 10, "C": 8, "D": 6, "E": 5}
+WEIGHTS = {"A": 10, "B": 10, "C": 8, "D": 3, "E": 5}
 BONUS_MULTIPLIER = 1.25
 BONUS_MIN_SCORE = 6
 BONUS_MIN_CATEGORIES = 2
 THRESHOLD_KRITIK = 200
 THRESHOLD_YUKSEK = 120
-THRESHOLD_ORTA = 70
+THRESHOLD_ORTA = 55   # matches run_digest's min_total — anything selected is ≥ ORTA
 
 # Stage-1 safety margin: pass to stage 2 if Haiku-scored total >= min_total * 0.7.
 # Keeps borderline cases alive so Opus can re-score with full analysis.
@@ -60,13 +60,16 @@ KATEGORİLER:
 A = Yapay Zeka & LLM (modeller, agentic AI, AI altyapısı)
 B = Fintech & Ödeme Sistemleri (embedded finance, anlık ödeme, neobank, açık bankacılık)
 C = Startup Funding / M&A / IPO ($10M+ yatırım, satın alma, halka arz, unicorn)
-D = Kripto & Web3 (stablecoin, CBDC, tokenizasyon, kurumsal blockchain)
+D = Kripto & Web3 (SADECE kurumsal düzey: stablecoin altyapısı, CBDC, tokenize
+    mevduat, düzenleyici çerçeve, kurumsal saklama)
 E = Genel Tech & Big Tech (Apple/Google/Meta/Amazon/Microsoft ürün lansmanları)
 
 KURALLAR:
 - 0 = hiç alakası yok, 10 = o kategorinin tam kalbinde
 - Spekülatif/söylenti haberler için tüm puanları 3'ün altında tut
 - Sayılarla (miktar, kullanıcı sayısı, metrik) desteklenen haberlere daha yüksek puan ver
+- Token fiyat hareketleri, DeFi protokol güncellemeleri, cüzdan/borsa duyuruları,
+  kripto hazine alım-satımları piyasa gürültüsüdür: D'yi 3'ün üstüne çıkarma
 
 Sadece JSON döndür, başka metin ekleme."""
 
@@ -139,7 +142,10 @@ class ScoredArticle:
 
 
 def _compute_total(a: int, b: int, c: int, d: int, e: int) -> tuple[float, bool]:
-    raw = a * 10 + b * 10 + c * 8 + d * 6 + e * 5
+    raw = (
+        a * WEIGHTS["A"] + b * WEIGHTS["B"] + c * WEIGHTS["C"]
+        + d * WEIGHTS["D"] + e * WEIGHTS["E"]
+    )
     scores = [a, b, c, d, e]
     high_count = sum(1 for s in scores if s >= BONUS_MIN_SCORE)
     has_bonus = high_count >= BONUS_MIN_CATEGORIES

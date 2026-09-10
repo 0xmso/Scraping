@@ -40,12 +40,13 @@ def main():
         return
 
     # ── 2. Analyze ────────────────────────────────────────────────────────────
+    MIN_TOTAL = 55
     print("🧠 Claude ile analiz ediliyor...")
-    scored = analyze_articles(raw_articles, min_total=70, max_results=10)
+    scored = analyze_articles(raw_articles, min_total=MIN_TOTAL, max_results=10)
 
     # ── 3. Report ─────────────────────────────────────────────────────────────
     print(f"\n{'═'*70}")
-    print(f"✅ {len(scored)} haber seçildi (toplam skor ≥ 70):\n")
+    print(f"✅ {len(scored)} haber seçildi (toplam skor ≥ {MIN_TOTAL}):\n")
     for i, art in enumerate(scored, 1):
         bonus = " ⭐" if art.has_bonus else ""
         print(f"  {i:2}. {art.signal_level}{bonus} | {art.total_score:.0f}pts")

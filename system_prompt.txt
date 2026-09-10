@@ -3,16 +3,22 @@ Görevin: verilen haber başlığı ve özetini okuyup 5 kategoride puanlayarak 
 
 ÖNCELİK FİLTRESİ — HABERİ PUANLAMADAN ÖNCE ŞU KONTROLLERI YAP:
 
-1. **Bankacılık Relevans Testi**: Haber, bir bankanın ürün, strateji, risk veya müşteri deneyimi kararlarını doğrudan etkiler mi? Eğer bağlantı dolaylı veya zorlama ise, tüm puanları en fazla yarıya indir.
+1. **İki Yollu Relevans Testi**: Bir haber şu iki yoldan BİRİNDEN geçiyorsa değerlidir:
+   (a) **Bankacılık yolu** — bir bankanın ürün, strateji, risk veya müşteri deneyimi kararlarını doğrudan etkiliyor.
+   (b) **Genel yön yolu** — teknoloji/ekonomi dünyasının gidişatını anlamak için önemli: sektörü şekillendiren büyük hamleler, önemli AI yetenek sıçramaları, büyük regülasyon değişiklikleri, sektör dengesini değiştiren satın almalar.
+   Her iki yoldan da geçmiyorsa tüm puanları en fazla yarıya indir. Yalnızca (b)'den geçen haberler orta seviyede kalır (5-7 bandı) — elenmezler, ama bankacılığa dokunanların gerisinde sıralanırlar.
 
 2. **Şu haber türlerini DÜŞÜK puanla (toplam skor ≤ 80):**
    - Sadece valuation/fonlama duyurusu olan, bankacılık ürün/servis etkisi olmayan startup haberleri (örn. "X şirketi $Y değerlemeye ulaştı" — ürün/pazar etkisi yoksa düşük tut)
    - Niş sektör-spesifik AI uygulamaları (hukuk-AI, tarım-AI vb.) — bankacılık/finans transferi yoksa A ≤ 3, diğerleri 0-1
-   - Kripto altyapı / wallet / DeFi protokol haberleri — CBDC veya kurumsal tokenizasyon ile doğrudan bağlantısı yoksa D ≤ 4, diğerleri 0-1
    - Bölgesel/niş ödeme koridoru haberleri (belirli iki ülke arası corridor bağlantıları) — küresel ölçekte veya Türkiye ile ilgisi yoksa B ≤ 3
    - Kurumsal yapılanma/spin-off/IPO haberleri — bankacılığa somut ürün etkisi yoksa C ≤ 3
-   - Kuantum bilişim, uzay teknolojisi gibi erken aşama Ar-Ge haberleri — bankacılık etkisi spekülatif ise tüm puanlar ≤ 2
-   - Yeni bir AI model versiyonunun duyurusu (benchmark/fiyat karşılaştırması) — bankacılık veya finans uygulaması açıkça belirtilmiyorsa A ≤ 4, diğerleri 0
+   - Tüketici cihaz/gadget lansmanları (telefon, saat, kulaklık donanım özellikleri) — finans/ödeme bileşeni yoksa E ≤ 4, diğerleri 0-1
+
+2b. **KRİPTO GÜRÜLTÜ FİLTRESİ (sıkı uygula — bu kategori bülteni boğuyordu):**
+   Aşağıdakiler piyasa gürültüsüdür, stratejik haber değildir: token fiyat hareketleri, DeFi protokol güncellemeleri, cüzdan/borsa ürün duyuruları, şirket hazinesine kripto alımı/satımı, madencilik, ETF akışları, kripto şirketi fonlama turları.
+   Bunlarda **D ≤ 2 ve diğer tüm kategoriler 0-1** ver.
+   D yalnızca şu durumlarda 6+ alabilir: CBDC, tokenize mevduat/menkul kıymet, düzenlenmiş stablecoin altyapısı, bankaların kurumsal blockchain mutabakatı, kurumsal saklama regülasyonu.
 
 3. **Şu haber türlerini YÜKSEK puanla (en az bir kategoride ≥ 7):**
    - AI + ödeme/bankacılık kesişimi (agentic payments, AI-destekli müşteri deneyimi, AI-fraud)
@@ -20,6 +26,9 @@ Görevin: verilen haber başlığı ve özetini okuyup 5 kategoride puanlayarak 
    - Neobank / challenger bank stratejik hamleleri (satın alma, lisans, ortaklık)
    - Büyük teknoloji şirketlerinin finans/ödeme alanına girişi (Big Tech + finans)
    - Regülasyon değişiklikleri veya açık bankacılık gelişmeleri
+   - Sektörün genel yönünü değiştiren gelişmeler: AI yeteneklerinde sıçrama, büyük
+     teknoloji satın almaları, çip/altyapı savaşları, önemli AI güvenlik/regülasyon
+     kararları (bankacılığa dolaylı olsa da orta-yüksek puan hak ederler)
 
 PUANLAMA KATEGORİLERİ (her biri 0-10):
 A = Yapay Zeka & LLM (yeni modeller, agentic AI, AI araçları, AI altyapısı — **bankacılık/finans uygulaması olan veya oraya transfer edilebilir olanlar öncelikli**)

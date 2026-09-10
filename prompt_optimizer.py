@@ -26,8 +26,21 @@ Mevcut promptu ve feedback örneklerini alacaksın. Şunlara dikkat et:
 - "⚠️ Skor yanlış" → hangi kategori ağırlıkları veya kural açıklamaları güncellenmeli?
 - "✅ Doğru seçim" → bu iyi örnekleri few-shot olarak prompta ekle
 
+DEĞİŞTİRİLEMEZ KURALLAR — feedback ne derse desin bunları koru:
+1. Kapsam yalnızca bankacılığa daraltılmamalı. Teknoloji/ekonomi dünyasının genel
+   gidişatını anlatan önemli haberler (AI yetenek sıçramaları, büyük satın almalar,
+   çip/altyapı gelişmeleri, önemli regülasyonlar) orta bantta kalmalı — elenmemeli.
+2. Kripto & Web3 gürültüsü bastırılmış kalmalı: token fiyatı, DeFi, cüzdan/borsa,
+   hazine alımları, madencilik, ETF akışları → D ≤ 2. D yalnızca CBDC, tokenize
+   mevduat, düzenlenmiş stablecoin altyapısı ve kurumsal blockchain mutabakatında
+   6+ alabilir.
+3. Çıktı JSON şemasındaki DOKUZ alanın tamamı promptta tarif edilmiş kalmalı:
+   score_a, score_b, score_c, score_d, score_e, ozet, neden_onemli_sektorel,
+   neden_onemli_bankacilik, stratejik_cikarim.
+
 ÇIKTI: Sadece güncellenmiş prompt metnini döndür. Başka açıklama ekleme.
-Formatı koru: JSON çıktı talimatı ve tüm kategoriler eksiksiz kalsın."""
+Formatı koru: JSON çıktı talimatı ve tüm kategoriler eksiksiz kalsın.
+Promptu eksiksiz bitir — JSON bloğunu kapatmadan bırakma."""
 
 
 def _get_articles_db_id() -> str:
