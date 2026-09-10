@@ -136,8 +136,66 @@ REQUIRED_FIELDS = (
 MAX_PROMPT_CHARS = 12000
 
 
+GOLDEN_FILE = Path(__file__).parent / "golden_articles.json"
+# One wrong call on the golden set is tolerable (models are not deterministic);
+# two means the rewrite genuinely changed judgement for the worse.
+MAX_GOLDEN_FAILURES = 1
+
+
 class PromptRejected(Exception):
     """Raised when a generated prompt fails validation and must not be written."""
+
+
+def behavioural_check(new_prompt: str) -> None:
+    """Score a fixed set of known articles with the new prompt.
+
+    validate_prompt() only proves a rewrite is well-formed. This proves it still
+    judges correctly: a prompt that is perfectly structured but, say, narrows the
+    scope until nothing qualifies will pass structural checks and quietly gut the
+    digest — that happened once and was only caught by hand.
+
+    Raises PromptRejected if the prompt misjudges more than MAX_GOLDEN_FAILURES.
+    """
+    if not GOLDEN_FILE.exists():
+        print("   [WARN] golden_articles.json yok — davranış testi atlandı.")
+        return
+
+    # Imported here so the module still loads without the digest's dependencies.
+    import llm
+    from analyzer import THRESHOLD_ORTA as MIN_TOTAL
+    from analyzer import _compute_total, _deep_analyze, _scores
+    from fetcher import RawArticle
+
+    golden = json.loads(GOLDEN_FILE.read_text(encoding="utf-8"))
+    client = llm.get_client()
+    failures: list[str] = []
+
+    for bucket, should_pass in (("must_pass", True), ("must_fail", False)):
+        for item in golden.get(bucket, []):
+            art = RawArticle(
+                title=item["title"], url="", summary=item["summary"],
+                published=None, source="golden",
+            )
+            try:
+                data = _deep_analyze(client, art, new_prompt)
+                total, _ = _compute_total(*_scores(data))
+            except Exception as exc:
+                failures.append(f"{item['title'][:45]} — puanlanamadı ({exc})")
+                continue
+
+            passed = total >= MIN_TOTAL
+            mark = "✓" if passed == should_pass else "✗"
+            print(f"   {mark} {total:5.0f}pt  {item['title'][:52]}")
+            if passed != should_pass:
+                want = f"≥{MIN_TOTAL}" if should_pass else f"<{MIN_TOTAL}"
+                failures.append(f"{item['title'][:45]} → {total:.0f} (beklenen {want})")
+
+    if len(failures) > MAX_GOLDEN_FAILURES:
+        raise PromptRejected(
+            f"davranış testinde {len(failures)} hata: " + " | ".join(failures)
+        )
+    if failures:
+        print(f"   [WARN] {len(failures)} tolere edilen sapma: {failures[0]}")
 
 
 def validate_prompt(new_prompt: str, current_prompt: str) -> None:
@@ -249,10 +307,14 @@ def run_optimization() -> str:
         raise PromptRejected("yanıt max_tokens sınırına çarptı (kesik)")
     validate_prompt(new_prompt, current_prompt)
 
+    print("\n🧪 Davranış testi (golden set)...")
+    behavioural_check(new_prompt)
+
     # 5. Save updated prompt
     PROMPT_FILE.write_text(new_prompt, encoding="utf-8")
     print(f"\n✅ system_prompt.txt güncellendi ({len(new_prompt)} karakter)")
     print(f"   Değişiklik: {len(new_prompt) - len(current_prompt):+d} karakter")
+    print(f"💰 {llm.usage_summary()}")
 
     return new_prompt
 

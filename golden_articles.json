@@ -1,0 +1,39 @@
+{
+  "_comment": "Behavioural test set for the prompt optimizer. Real headlines the digest has seen. must_pass items are unambiguously worth surfacing; must_fail items are the noise the digest exists to filter out. A rewritten prompt that gets these wrong is rejected before it reaches production, regardless of whether it is structurally valid.",
+  "must_pass": [
+    {
+      "title": "Mastercard moves to help merchants prepare for AI-powered commerce",
+      "summary": "Mastercard is rolling out infrastructure and standards so merchants can accept payments initiated by AI agents, covering authentication, dispute handling and settlement."
+    },
+    {
+      "title": "Visa and Revolut carry out passkey-based agentic payment in France",
+      "summary": "Visa and Revolut completed a live pilot in which an AI agent initiated a payment authenticated with a passkey, a first for agentic commerce in Europe."
+    },
+    {
+      "title": "Chime acquires banking partner",
+      "summary": "Neobank Chime has acquired the chartered bank that provided its deposit infrastructure, bringing licensing and compliance in house."
+    },
+    {
+      "title": "'Welcome to the AGI era': OpenAI launches GPT-6 Astra",
+      "summary": "OpenAI released GPT-6 Astra, claiming a substantial jump in reasoning and autonomous task completion over the previous generation, with enterprise availability at launch."
+    }
+  ],
+  "must_fail": [
+    {
+      "title": "Dogecoin sinks 5% to lead majors' losses, with bitcoin holding steady",
+      "summary": "Dogecoin fell 5% over 24 hours while bitcoin traded flat, as major tokens saw mixed movement on modest volume."
+    },
+    {
+      "title": "Live updates: Bitcoin ETFs post a second straight outflow week",
+      "summary": "Spot bitcoin exchange-traded funds recorded net outflows for a second consecutive week, according to daily flow data."
+    },
+    {
+      "title": "SGX's bitcoin and ether perpetual futures are now open to US traders",
+      "summary": "The Singapore Exchange has opened access to its bitcoin and ether perpetual futures contracts for eligible United States trading firms."
+    },
+    {
+      "title": "There are new shiny iPhones, so Apple is making you buy new cases too",
+      "summary": "Apple's redesigned iPhone lineup changes the camera housing dimensions, meaning last year's cases no longer fit the new models."
+    }
+  ]
+}

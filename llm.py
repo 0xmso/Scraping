@@ -55,6 +55,12 @@ def backend_name() -> str:
     return "Claude API (birinci taraf)"
 
 
+# The SDK retries 408/409/429/5xx and connection errors with exponential
+# backoff. The default of 2 wasn't enough — a transient Bedrock 500 took down a
+# whole optimizer run — and these are batch jobs where waiting beats failing.
+MAX_RETRIES = 5
+
+
 def get_client():
     """Return an Anthropic client for the active backend.
 
@@ -64,19 +70,50 @@ def get_client():
     if use_bedrock():
         region = os.environ.get("AWS_REGION", DEFAULT_AWS_REGION)
         # The client reads AWS_BEARER_TOKEN_BEDROCK from the environment.
-        return anthropic.AnthropicBedrockMantle(aws_region=region)
+        return anthropic.AnthropicBedrockMantle(
+            aws_region=region, max_retries=MAX_RETRIES
+        )
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError(
             "Ne AWS_BEARER_TOKEN_BEDROCK ne de ANTHROPIC_API_KEY ayarlı."
         )
-    return anthropic.Anthropic(api_key=api_key)
+    return anthropic.Anthropic(api_key=api_key, max_retries=MAX_RETRIES)
 
 
 def has_credentials() -> bool:
     """True when either backend is configured."""
     return use_bedrock() or bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
+# ── Token accounting ──────────────────────────────────────────────────────────
+# Every call adds to this so a run can report what it spent. Bedrock bills to
+# AWS credits, which are otherwise invisible from inside the job.
+_usage = {"calls": 0, "input": 0, "output": 0, "cache_read": 0}
+
+
+def _record_usage(response) -> None:
+    u = getattr(response, "usage", None)
+    if u is None:
+        return
+    _usage["calls"] += 1
+    _usage["input"] += getattr(u, "input_tokens", 0) or 0
+    _usage["output"] += getattr(u, "output_tokens", 0) or 0
+    _usage["cache_read"] += getattr(u, "cache_read_input_tokens", 0) or 0
+
+
+def usage_summary() -> str:
+    """One-line token report for the run."""
+    if not _usage["calls"]:
+        return "Token kullanımı: (çağrı yok)"
+    cached = (
+        f" · {_usage['cache_read']:,} cache okuma" if _usage["cache_read"] else ""
+    )
+    return (
+        f"Token kullanımı: {_usage['calls']} çağrı · "
+        f"{_usage['input']:,} girdi · {_usage['output']:,} çıktı{cached}"
+    )
 
 
 def call_structured(
@@ -119,6 +156,7 @@ def call_structured(
         kwargs["output_config"] = {"effort": effort}
 
     response = client.messages.create(**kwargs)
+    _record_usage(response)
     block = next((b for b in response.content if b.type == "tool_use"), None)
     if block is None:
         raise ValueError(f"Yanıtta tool_use bloğu yok (stop={response.stop_reason})")
