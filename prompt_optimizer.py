@@ -34,9 +34,10 @@ DEĞİŞTİRİLEMEZ KURALLAR — feedback ne derse desin bunları koru:
    hazine alımları, madencilik, ETF akışları → D ≤ 2. D yalnızca CBDC, tokenize
    mevduat, düzenlenmiş stablecoin altyapısı ve kurumsal blockchain mutabakatında
    6+ alabilir.
-3. Çıktı JSON şemasındaki DOKUZ alanın tamamı promptta tarif edilmiş kalmalı:
+3. Çıktı JSON şemasındaki SEKİZ alanın tamamı promptta tarif edilmiş kalmalı:
    score_a, score_b, score_c, score_d, score_e, ozet, neden_onemli_sektorel,
-   neden_onemli_bankacilik, stratejik_cikarim.
+   stratejik_cikarim. Bankacılık açısı ayrı bir alan DEĞİL — stratejik_cikarim
+   içinde ele alınır, ayrı alan ekleme.
 
 ÇIKTI: Sadece güncellenmiş prompt metnini döndür. Başka açıklama ekleme.
 Formatı koru: JSON çıktı talimatı ve tüm kategoriler eksiksiz kalsın.
@@ -131,7 +132,7 @@ def _extract_feedback_items(pages: list[dict]) -> list[dict]:
 # schema silently forces it to emit.
 REQUIRED_FIELDS = (
     "score_a", "score_b", "score_c", "score_d", "score_e",
-    "ozet", "neden_onemli_sektorel", "neden_onemli_bankacilik", "stratejik_cikarim",
+    "ozet", "neden_onemli_sektorel", "stratejik_cikarim",
 )
 MAX_PROMPT_CHARS = 12000
 

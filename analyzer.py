@@ -99,12 +99,11 @@ STAGE2_SCHEMA = {
         "score_e": {"type": "integer"},
         "ozet": {"type": "string"},
         "neden_onemli_sektorel": {"type": "string"},
-        "neden_onemli_bankacilik": {"type": "string"},
         "stratejik_cikarim": {"type": "string"},
     },
     "required": [
         "score_a", "score_b", "score_c", "score_d", "score_e",
-        "ozet", "neden_onemli_sektorel", "neden_onemli_bankacilik", "stratejik_cikarim",
+        "ozet", "neden_onemli_sektorel", "stratejik_cikarim",
     ],
     "additionalProperties": False,
 }
@@ -136,7 +135,6 @@ class ScoredArticle:
     # Turkish analysis
     ozet: str = ""
     neden_onemli_sektorel: str = ""
-    neden_onemli_bankacilik: str = ""
     stratejik_cikarim: str = ""
 
 
@@ -295,7 +293,6 @@ def analyze_articles(
                     signal_level=level,
                     ozet=data.get("ozet", ""),
                     neden_onemli_sektorel=data.get("neden_onemli_sektorel", ""),
-                    neden_onemli_bankacilik=data.get("neden_onemli_bankacilik", ""),
                     stratejik_cikarim=data.get("stratejik_cikarim", ""),
                 )
             )

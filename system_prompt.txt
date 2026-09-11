@@ -57,7 +57,6 @@ FEW-SHOT ÖRNEKLER (doğru puanlanmış referans haberler):
   "score_e": 0,
   "ozet": "Visa ve Revolut, Fransa'da passkey tabanlı agentic ödeme pilotu gerçekleştirdi. Bu pilot, yapay zeka ajanlarının kullanıcı adına ödeme başlatabildiği yeni nesil bir ödeme deneyimini test ediyor. Proje, biyometrik kimlik doğrulama ile AI-agent ödemelerini birleştiren ilk büyük ölçekli denemelerden biri.",
   "neden_onemli_sektorel": "Agentic payments kavramı, ödeme altyapısının AI ajanlarına uyumlu hale getirilmesinin ilk somut adımı. Visa gibi küresel bir ağın bu pilota girmesi, konseptin olgunlaştığını gösteriyor.",
-  "neden_onemli_bankacilik": "Passkey tabanlı kimlik doğrulama ve AI-agent ödemeleri, bankaların ödeme akışlarını yeniden tasarlamasını gerektirecek. Erken adapte olan bankalar rekabet avantajı kazanabilir.",
   "stratejik_cikarim": "Bu yüzden agentic payment altyapımızı ve passkey entegrasyonumuzu PoC seviyesinde test etmeye başlamalıyız."
 }
 ```
@@ -72,7 +71,6 @@ FEW-SHOT ÖRNEKLER (doğru puanlanmış referans haberler):
   "score_e": 0,
   "ozet": "ABD'nin en büyük neobankı Chime, bankacılık altyapı ortağını satın aldı. Bu hamle, Chime'ın BaaS bağımlılığını azaltarak dikey entegrasyona geçtiğini gösteriyor. Satın alma, neobank'ların kendi lisanslarıyla operasyon yürütme trendinin güçlendiğine işaret ediyor.",
   "neden_onemli_sektorel": "Neobank'ların partner bank modelinden çıkıp kendi lisanslarını edinmesi, fintech-banka ilişkisinin yapısal dönüşümüne işaret ediyor.",
-  "neden_onemli_bankacilik": "BaaS sağlayıcısı olan bankalar için müşteri kaybı riski artıyor. Geleneksel bankalar, fintech ortaklık stratejilerini yeniden değerlendirmeli.",
   "stratejik_cikarim": "Bu nedenle BaaS ve fintech ortaklık modelimizdeki bağımlılık risklerini gözden geçirmeliyiz."
 }
 ```
@@ -87,7 +85,6 @@ FEW-SHOT ÖRNEKLER (doğru puanlanmış referans haberler):
   "score_e": 8,
   "ozet": "Meta, kişisel AI asistanı Muse'u piyasaya sürdü; Stripe entegrasyonuyla ödeme yetenekleri de içeriyor. Bu hamle, büyük teknoloji şirketlerinin AI asistanlarına ödeme katmanı ekleyerek commerce alanına girişini somutlaştırıyor.",
   "neden_onemli_sektorel": "Big Tech AI asistanlarının ödeme işlevi kazanması, geleneksel ödeme akışlarını bypass edebilecek yeni bir kanal yaratıyor. Stripe'ın bu ekosisteme girmesi, altyapı katmanının hızla şekillendiğini gösteriyor.",
-  "neden_onemli_bankacilik": "AI asistanları üzerinden yapılan ödemeler, banka kartı/uygulamasının devre dışı kalma riskini artırıyor. Bankaların bu yeni arayüzlerle entegrasyon stratejisi geliştirmesi şart.",
   "stratejik_cikarim": "Bu yüzden AI asistan ekosistemlerindeki ödeme entegrasyon fırsatlarını ve banka kartı görünürlüğü risklerini acil olarak değerlendirmeliyiz."
 }
 ```
@@ -101,6 +98,5 @@ FEW-SHOT ÖRNEKLER (doğru puanlanmış referans haberler):
   "score_e": <int 0-10>,
   "ozet": "<3-4 cümle Türkçe özet: kim, ne yaptı, hangi ölçekte, hangi bağlamda — sayılarla destekle>",
   "neden_onemli_sektorel": "<1-2 cümle: teknoloji/finans/inovasyon ekosistemi için ne anlama geliyor>",
-  "neden_onemli_bankacilik": "<1-2 cümle: banka kurumu için fırsat, tehdit veya öğrenme noktası>",
   "stratejik_cikarim": "<TEK cümle: 'Bu yüzden X yapmalıyız' veya 'Bu nedenle Y izlenmeli' formatında>"
 }

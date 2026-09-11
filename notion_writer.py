@@ -98,7 +98,6 @@ def _write_article_row(notion: Client, articles_db_id: str, art: ScoredArticle, 
             "Kesişim Bonusu":    {"checkbox": art.has_bonus},
             "Özet":              {"rich_text": [{"type": "text", "text": {"content": art.ozet[:2000]}}]},
             "Sektörel":          {"rich_text": [{"type": "text", "text": {"content": art.neden_onemli_sektorel[:2000]}}]},
-            "Bankacılık":        {"rich_text": [{"type": "text", "text": {"content": art.neden_onemli_bankacilik[:2000]}}]},
             "Stratejik Çıkarım": {"rich_text": [{"type": "text", "text": {"content": art.stratejik_cikarim[:2000]}}]},
         },
     )
@@ -127,7 +126,6 @@ def _article_blocks(art: ScoredArticle) -> list[dict]:
 
     blocks.append(_p_rich(("⚡ Neden Önemli", True, False)))
     blocks.append(_p_rich(("Sektörel: ", True, False), (art.neden_onemli_sektorel or "—", False, False)))
-    blocks.append(_p_rich(("Bankacılık açısından: ", True, False), (art.neden_onemli_bankacilik or "—", False, False)))
     blocks.append(_callout(art.stratejik_cikarim or "—", "🎯"))
     blocks.append(_divider())
     return blocks
