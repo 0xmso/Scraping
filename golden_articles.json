@@ -1,5 +1,5 @@
 {
-  "_comment": "Behavioural test set for the prompt optimizer. Real headlines the digest has seen. must_pass items are unambiguously worth surfacing; must_fail items are the noise the digest exists to filter out. A rewritten prompt that gets these wrong is rejected before it reaches production, regardless of whether it is structurally valid.",
+  "_comment": "Behavioural test set for the prompt optimizer. Real-pattern headlines the digest has seen or would plausibly see. must_pass items are unambiguously worth surfacing; must_fail items are the noise the digest exists to filter out. A rewritten prompt that gets these wrong is rejected before it reaches production, regardless of whether it is structurally valid. Several pairs are deliberately contrastive — near-identical setups with opposite outcomes — to pin the exact decision boundary (funding relevance, license application vs. grant, AI-model announcement vs. banking-tied application) rather than just easy/obvious cases.",
   "must_pass": [
     {
       "title": "Mastercard moves to help merchants prepare for AI-powered commerce",
@@ -16,6 +16,90 @@
     {
       "title": "'Welcome to the AGI era': OpenAI launches GPT-6 Astra",
       "summary": "OpenAI released GPT-6 Astra, claiming a substantial jump in reasoning and autonomous task completion over the previous generation, with enterprise availability at launch."
+    },
+    {
+      "title": "JPMorgan pilots tokenized deposit settlement with three European banks",
+      "summary": "JPMorgan's blockchain unit completed a pilot moving tokenized commercial bank deposits between three European institutions, cutting settlement time from days to minutes."
+    },
+    {
+      "title": "Revolut secures full UK banking license after three-year wait",
+      "summary": "Revolut has been granted a full UK banking license by the PRA, ending a multi-year restricted phase and allowing it to hold customer deposits directly."
+    },
+    {
+      "title": "OpenAI's new model integration lets banks automate loan underwriting decisions",
+      "summary": "OpenAI announced a partnership enabling banks to plug its latest model into loan underwriting workflows, with early pilots at two regional US banks showing faster decision times."
+    },
+    {
+      "title": "Stripe raises $50M to build AI-powered fraud detection for banks",
+      "summary": "Stripe's new funding round will fund an AI fraud-detection product aimed specifically at bank and fintech clients, expanding beyond its existing merchant tools."
+    },
+    {
+      "title": "Standard Chartered launches institutional stablecoin custody service",
+      "summary": "Standard Chartered opened a regulated custody service for institutional clients holding major stablecoins, positioned as a bridge between traditional and digital-asset banking."
+    },
+    {
+      "title": "Google and Meta both cut deals with major banks to embed AI assistants in mobile banking apps",
+      "summary": "Google and Meta separately signed agreements with large retail banks to power in-app AI assistants for customer service and financial guidance."
+    },
+    {
+      "title": "EU finalizes open banking directive requiring real-time data sharing by 2027",
+      "summary": "The European Commission finalized PSD3 rules mandating real-time account data sharing between banks and licensed third parties by 2027, replacing the older PSD2 framework."
+    },
+    {
+      "title": "Anthropic and Visa announce partnership to build agentic commerce standards",
+      "summary": "Anthropic and Visa said they will jointly develop technical standards for AI agents initiating and authorizing payments on behalf of users."
+    },
+    {
+      "title": "Nvidia unveils next-gen AI chip aimed at real-time fraud detection at scale",
+      "summary": "Nvidia's new chip line is designed for low-latency inference workloads, with fraud detection at payment-network scale cited as a flagship use case by early bank customers."
+    },
+    {
+      "title": "Amazon's AWS wins multi-year cloud and AI contract with a top-5 global bank",
+      "summary": "AWS signed a multi-year agreement to migrate core banking workloads and deploy generative AI tools for a top-5 global bank by assets."
+    },
+    {
+      "title": "SWIFT rolls out AI-based instant cross-border payment screening for member banks",
+      "summary": "SWIFT introduced an AI screening layer that flags suspicious cross-border transactions in real time, available to its member banks starting next quarter."
+    },
+    {
+      "title": "Anthropic raises new funding round at $350B valuation to scale enterprise AI deployment",
+      "summary": "Anthropic closed a new funding round valuing the company at $350B, with proceeds earmarked for enterprise deployment infrastructure and compute capacity."
+    },
+    {
+      "title": "US Treasury proposes new framework for regulating AI use in consumer lending",
+      "summary": "The US Treasury Department proposed rules requiring lenders to disclose when AI models are used in credit decisions and to document how adverse-action reasons are generated."
+    },
+    {
+      "title": "PayPal launches agentic checkout letting AI assistants complete purchases on user's behalf",
+      "summary": "PayPal introduced an agentic checkout API that lets third-party AI assistants complete purchases using a user's stored payment credentials with explicit per-transaction authorization."
+    },
+    {
+      "title": "Meta unveils AI model capable of autonomous multi-step reasoning, beating prior benchmarks by wide margin",
+      "summary": "Meta's newest model posted large gains on multi-step reasoning benchmarks, which the company says translates into more reliable autonomous task completion."
+    },
+    {
+      "title": "Ant Group and DBS Bank launch joint venture for cross-border digital payments in Asia",
+      "summary": "Ant Group and DBS Bank formed a joint venture to build shared cross-border payment rails across Southeast Asia, targeting SME remittances first."
+    },
+    {
+      "title": "OpenAI signs deal to provide compute-backed AI infrastructure worth $100B with Oracle",
+      "summary": "OpenAI and Oracle signed a multi-year infrastructure agreement worth roughly $100B to secure compute capacity for future model training and deployment."
+    },
+    {
+      "title": "Wells Fargo deploys agentic AI to handle 40% of customer service interactions",
+      "summary": "Wells Fargo said an agentic AI system now resolves roughly 40% of customer service interactions without human escalation, based on a year-long rollout."
+    },
+    {
+      "title": "HSBC and Ant International complete first tokenized trade finance settlement in Hong Kong",
+      "summary": "HSBC and Ant International settled a trade finance transaction using tokenized deposits on a shared ledger, described as the first of its kind in Hong Kong."
+    },
+    {
+      "title": "EU AI Act enforcement begins, banks face new compliance requirements for algorithmic credit scoring",
+      "summary": "As EU AI Act enforcement began, banks operating in the bloc must now document and audit algorithmic credit-scoring systems classified as high-risk."
+    },
+    {
+      "title": "Klarna granted full banking license by German regulator",
+      "summary": "Klarna received full banking license approval from Germany's BaFin, allowing it to offer deposit accounts directly rather than through a partner bank."
     }
   ],
   "must_fail": [
@@ -34,6 +118,90 @@
     {
       "title": "There are new shiny iPhones, so Apple is making you buy new cases too",
       "summary": "Apple's redesigned iPhone lineup changes the camera housing dimensions, meaning last year's cases no longer fit the new models."
+    },
+    {
+      "title": "Fintech startup applies for banking license in Germany, decision expected next year",
+      "summary": "A Berlin-based fintech startup submitted a banking license application to BaFin, with regulators saying a decision is not expected until at least mid-next year."
+    },
+    {
+      "title": "OpenAI releases GPT-6 Sol with improved benchmark scores across math and coding",
+      "summary": "OpenAI released GPT-6 Sol, reporting improved scores on standard math and coding benchmarks compared to its predecessor, with no specific enterprise use case highlighted."
+    },
+    {
+      "title": "AI-powered legal research startup reaches $2B valuation in new funding round",
+      "summary": "A legal-research AI startup closed a new funding round that values the company at $2B, with the round led by a growth-stage venture fund."
+    },
+    {
+      "title": "Ethereum layer-2 protocol Arbitrum launches new liquidity mining program",
+      "summary": "Arbitrum introduced a new liquidity mining program offering token rewards to users who provide liquidity to select decentralized exchange pools."
+    },
+    {
+      "title": "Crypto wallet app MetaMask adds support for three new token standards",
+      "summary": "MetaMask rolled out support for three additional token standards, letting users hold and transfer a wider range of assets directly from the wallet app."
+    },
+    {
+      "title": "Coinbase reports Q3 trading volume up 12% as retail crypto activity rebounds",
+      "summary": "Coinbase reported a 12% quarter-over-quarter increase in trading volume, attributing the rebound to renewed retail interest in crypto markets."
+    },
+    {
+      "title": "Rumors swirl that Apple may be exploring a foldable iPhone for 2028",
+      "summary": "Unnamed supply-chain sources speculate that Apple is evaluating a foldable iPhone design for a possible 2028 launch, though nothing has been confirmed."
+    },
+    {
+      "title": "New Samsung Galaxy Buds feature improved noise cancellation and longer battery life",
+      "summary": "Samsung's latest earbuds add stronger active noise cancellation and roughly two more hours of battery life compared to the prior generation."
+    },
+    {
+      "title": "AI-powered farming startup raises $8M to help small farmers optimize irrigation",
+      "summary": "A seed-stage startup raised $8M for an AI platform that helps small farmers time irrigation based on soil-moisture sensors and weather forecasts."
+    },
+    {
+      "title": "Legal-tech startup Harvey partners with boutique law firm for contract review pilot",
+      "summary": "Harvey announced a pilot partnership with a boutique law firm to test AI-assisted contract review on a limited caseload."
+    },
+    {
+      "title": "Local logistics startup in Southeast Asia raises $3M seed round for delivery route optimization",
+      "summary": "A Jakarta-based logistics startup raised a $3M seed round to build software that optimizes last-mile delivery routes for local couriers."
+    },
+    {
+      "title": "Company X's CEO steps down amid internal restructuring, no successor named yet",
+      "summary": "The CEO of a mid-sized tech company is stepping down as part of an internal reorganization; the board has not yet named a successor or outlined changes to products or operations."
+    },
+    {
+      "title": "Video game studio unveils new AI NPC behavior system for upcoming title",
+      "summary": "A game studio showed off a new AI system that gives non-player characters more dynamic, context-aware behavior in its upcoming open-world title."
+    },
+    {
+      "title": "Reports suggest TikTok is testing a new algorithm change, company declines to comment",
+      "summary": "Unverified reports claim TikTok is testing changes to its recommendation algorithm; the company declined to confirm or provide details."
+    },
+    {
+      "title": "Regional payment corridor launches between two small island nations, processing under $1M monthly",
+      "summary": "A new cross-border payment corridor began operating between two small island nations, with initial monthly transaction volume reported under $1M."
+    },
+    {
+      "title": "Startup spins off its hardware division into a separate company, no product changes announced",
+      "summary": "A consumer tech startup spun off its hardware division into an independently operated company; no changes to existing products or roadmaps were announced."
+    },
+    {
+      "title": "New noise-cancelling headphones from Sony promise 'studio-quality' sound for commuters",
+      "summary": "Sony's newest over-ear headphones target commuters with improved noise cancellation and a claimed 'studio-quality' audio profile."
+    },
+    {
+      "title": "Solana-based NFT marketplace sees trading volume spike after celebrity endorsement",
+      "summary": "Trading volume on a Solana-based NFT marketplace spiked after a celebrity publicly endorsed one of its collections on social media."
+    },
+    {
+      "title": "Analysts speculate Tesla could enter humanoid robot mass production 'as early as' 2027",
+      "summary": "Industry analysts speculate, without confirmation from the company, that Tesla could begin mass production of its humanoid robot as early as 2027."
+    },
+    {
+      "title": "Popular mobile game adds new seasonal content update with cosmetic items",
+      "summary": "A widely played mobile game rolled out a seasonal update adding new cosmetic character items and a limited-time in-game event."
+    },
+    {
+      "title": "Crypto miner Riot Platforms reports higher hash rate after facility expansion",
+      "summary": "Bitcoin miner Riot Platforms reported a higher network hash rate contribution following the expansion of one of its mining facilities."
     }
   ]
 }

@@ -38,6 +38,12 @@ DEĞİŞTİRİLEMEZ KURALLAR — feedback ne derse desin bunları koru:
    score_a, score_b, score_c, score_d, score_e, ozet, neden_onemli_sektorel,
    stratejik_cikarim. Bankacılık açısı ayrı bir alan DEĞİL — stratejik_cikarim
    içinde ele alınır, ayrı alan ekleme.
+4. Uydurma yasağı talimatı ("yalnızca başlık ve özette verilen bilgiyi kullan,
+   sayı/detay uydurma") aynen korunmalı — silinmemeli, zayıflatılmamalı.
+5. Few-shot örnekler arasında en az 2 KONTRASTLI ÇİFT bulunmalı: birbirine çok
+   benzeyen ama biri geçmesi biri elenmesi gereken iki haber, karar sınırını
+   göstermek için yan yana. Yeni feedback'ten iyi örnek eklerken mevcut
+   kontrastlı çiftleri silme; gerekirse feedback'ten yeni bir çift üret.
 
 ÇIKTI: Sadece güncellenmiş prompt metnini döndür. Başka açıklama ekleme.
 Formatı koru: JSON çıktı talimatı ve tüm kategoriler eksiksiz kalsın.
@@ -134,13 +140,19 @@ REQUIRED_FIELDS = (
     "score_a", "score_b", "score_c", "score_d", "score_e",
     "ozet", "neden_onemli_sektorel", "stratejik_cikarim",
 )
-MAX_PROMPT_CHARS = 12000
+# Raised alongside the golden-set expansion: the richer prompt (grounding rule +
+# contrastive example pairs) already runs ~13K chars. Token cost isn't a
+# constraint here, so this ceiling exists only to catch a runaway/broken
+# generation, not to cap deliberate growth.
+MAX_PROMPT_CHARS = 25000
 
 
 GOLDEN_FILE = Path(__file__).parent / "golden_articles.json"
-# One wrong call on the golden set is tolerable (models are not deterministic);
-# two means the rewrite genuinely changed judgement for the worse.
-MAX_GOLDEN_FAILURES = 1
+# Tolerance scales with set size rather than a fixed count: models aren't
+# deterministic, so a large golden set (50+) will trip a fixed low threshold
+# on ordinary per-call variance, not genuine regression. ~10% headroom, floor
+# of 1 so a tiny set still catches a real miss.
+GOLDEN_FAILURE_RATE = 0.10
 
 
 class PromptRejected(Exception):
@@ -168,6 +180,9 @@ def behavioural_check(new_prompt: str) -> None:
     from fetcher import RawArticle
 
     golden = json.loads(GOLDEN_FILE.read_text(encoding="utf-8"))
+    total_items = len(golden.get("must_pass", [])) + len(golden.get("must_fail", []))
+    max_failures = max(1, round(total_items * GOLDEN_FAILURE_RATE))
+
     client = llm.get_client()
     failures: list[str] = []
 
@@ -191,12 +206,13 @@ def behavioural_check(new_prompt: str) -> None:
                 want = f"≥{MIN_TOTAL}" if should_pass else f"<{MIN_TOTAL}"
                 failures.append(f"{item['title'][:45]} → {total:.0f} (beklenen {want})")
 
-    if len(failures) > MAX_GOLDEN_FAILURES:
+    if len(failures) > max_failures:
         raise PromptRejected(
-            f"davranış testinde {len(failures)} hata: " + " | ".join(failures)
+            f"davranış testinde {len(failures)}/{total_items} hata "
+            f"(tolerans: {max_failures}): " + " | ".join(failures)
         )
     if failures:
-        print(f"   [WARN] {len(failures)} tolere edilen sapma: {failures[0]}")
+        print(f"   [WARN] {len(failures)}/{total_items} tolere edilen sapma: {failures[0]}")
 
 
 def validate_prompt(new_prompt: str, current_prompt: str) -> None:

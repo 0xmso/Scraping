@@ -45,6 +45,11 @@ KURALLAR:
 - **Çoklu kategori kesişimi bonusu**: Haber 2+ kategoriyi doğal şekilde kapsıyorsa (örn. AI + ödeme) bu kategorilerin her birinde ayrı ayrı yüksek puan ver
 - Bir haberin "ilginç" olması yeterli değil; **"bir banka inovasyon ekibi bunu neden gündemine alsın?"** sorusuna net yanıt verilememesi halinde puanları düşür
 
+UYDURMA YASAĞI: ozet, neden_onemli_sektorel ve stratejik_cikarim alanlarında YALNIZCA
+başlıkta ve verilen özette yer alan bilgiyi kullan. Kaynakta belirtilmeyen sayı, oran,
+isim, tarih veya detay EKLEME. Kaynakta net olmayan bir noktayı kesinmiş gibi sunma —
+gerekiyorsa "kaynakta detay verilmemiş" ifadesini kullan.
+
 FEW-SHOT ÖRNEKLER (doğru puanlanmış referans haberler):
 
 Örnek 1 — "Visa and Revolut carry out passkey-based agentic payment in France"
@@ -88,6 +93,71 @@ FEW-SHOT ÖRNEKLER (doğru puanlanmış referans haberler):
   "stratejik_cikarim": "Bu yüzden AI asistan ekosistemlerindeki ödeme entegrasyon fırsatlarını ve banka kartı görünürlüğü risklerini acil olarak değerlendirmeliyiz."
 }
 ```
+
+KONTRASTLI ÖRNEK ÇİFTLERİ (birbirine benzer ama zıt sonuçlu — karar sınırını gösterir):
+
+Çift A — Fonlama: bankacılık ilgisi yok vs. var
+Örnek 4a (ELENMELİ) — "AI-powered legal research startup reaches $2B valuation in new funding round"
+```json
+{
+  "score_a": 2, "score_b": 0, "score_c": 2, "score_d": 0, "score_e": 0,
+  "ozet": "Hukuk alanına odaklı bir AI araştırma startup'ı yeni bir fonlama turuyla 2 milyar dolar değerlemeye ulaştı. Haberde ürünün bankacılık veya finans sektörüne dair bir uygulaması belirtilmiyor.",
+  "neden_onemli_sektorel": "Niş bir dikey alanda değerleme artışı; sektör geneline dair somut bir sinyal taşımıyor.",
+  "stratejik_cikarim": "Bu haber bankacılık gündemimiz için izlenmesi gereken bir gelişme değil."
+}
+```
+Örnek 4b (GEÇMELİ) — "Stripe raises $50M to build AI-powered fraud detection for banks"
+```json
+{
+  "score_a": 6, "score_b": 8, "score_c": 6, "score_d": 0, "score_e": 0,
+  "ozet": "Stripe, banka ve fintech müşterilerine yönelik AI destekli dolandırıcılık tespit ürünü geliştirmek için 50 milyon dolar fonlama aldı. Yatırım doğrudan bankacılık müşterilerine hizmet edecek bir ürüne yönlendiriliyor.",
+  "neden_onemli_sektorel": "Ödeme altyapısı sağlayıcılarının AI-fraud alanına yatırımı, bankaların üçüncü taraf risk araçlarına erişimini genişletiyor.",
+  "stratejik_cikarim": "Bu nedenle Stripe'ın yeni fraud ürününü mevcut risk yönetimi araçlarımızla karşılaştırmalıyız."
+}
+```
+Fark: aynı "fonlama haberi" kalıbı, ama 4b'de ürün doğrudan bankalara hizmet ediyor — bu yüzden C ve B yüksek, 4a'da C düşük tutuluyor (kural 2, ilk madde).
+
+Çift B — Lisans: başvuru vs. onay
+Örnek 5a (ELENMELİ) — "Fintech startup applies for banking license in Germany, decision expected next year"
+```json
+{
+  "score_a": 0, "score_b": 3, "score_c": 1, "score_d": 0, "score_e": 0,
+  "ozet": "Berlin merkezli bir fintech, BaFin'e banka lisansı başvurusunda bulundu; düzenleyici kararın önümüzdeki yıla kadar beklenmediği belirtiliyor.",
+  "neden_onemli_sektorel": "Başvuru aşamasında, henüz sonuçlanmamış bir süreç — takip edilecek ama şimdilik düşük öncelikli.",
+  "stratejik_cikarim": "Bu haber için şu an aksiyon gerekmiyor, karar açıklandığında yeniden değerlendirilmeli."
+}
+```
+Örnek 5b (GEÇMELİ) — "Revolut secures full UK banking license after three-year wait"
+```json
+{
+  "score_a": 0, "score_b": 8, "score_c": 3, "score_d": 0, "score_e": 0,
+  "ozet": "Revolut, üç yıllık bekleyişin ardından İngiltere'de tam banka lisansı aldı. Bu, şirketin artık müşteri mevduatlarını doğrudan tutabileceği anlamına geliyor.",
+  "neden_onemli_sektorel": "Büyük bir neobank'ın tam lisans alması, fintech-banka rekabetinin yeni bir aşamaya geçtiğini gösteriyor.",
+  "stratejik_cikarim": "Bu nedenle Revolut'un lisans sonrası ürün stratejisini yakından izlemeliyiz."
+}
+```
+Fark: aynı "banka lisansı" konusu, ama 5a başvuru (B≤5, kural 4), 5b onaylanmış lisans (B≥7, kural 4).
+
+Çift C — AI model duyurusu: genel vs. bankacılığa bağlı
+Örnek 6a (ELENMELİ) — "OpenAI releases GPT-6 Sol with improved benchmark scores across math and coding"
+```json
+{
+  "score_a": 4, "score_b": 0, "score_c": 0, "score_d": 0, "score_e": 1,
+  "ozet": "OpenAI, matematik ve kodlama benchmark'larında iyileşme gösteren GPT-6 Sol modelini yayımladı. Duyuruda bankacılık veya finans uygulamasına dair bir vurgu yok.",
+  "neden_onemli_sektorel": "Genel model performans artışı; belirli bir sektörel uygulama belirtilmediği için etkisi dolaylı.",
+  "stratejik_cikarim": "Bu model duyurusu şu an için doğrudan bir aksiyon gerektirmiyor."
+}
+```
+Örnek 6b (GEÇMELİ) — "OpenAI's new model integration lets banks automate loan underwriting decisions"
+```json
+{
+  "score_a": 8, "score_b": 7, "score_c": 0, "score_d": 0, "score_e": 3,
+  "ozet": "OpenAI, bankaların kredi onay süreçlerini otomatikleştirebileceği bir model entegrasyonu duyurdu; iki bölgesel ABD bankasındaki pilot uygulamalarda karar sürelerinin kısaldığı bildiriliyor.",
+  "neden_onemli_sektorel": "AI modellerinin doğrudan kredi karar süreçlerine entegrasyonu, bankacılıkta somut bir operasyonel dönüşüm örneği.",
+  "stratejik_cikarim": "Bu nedenle kredi onay süreçlerimizde benzer bir AI entegrasyonunun fizibilitesini değerlendirmeliyiz."
+}
+```
+Fark: aynı "yeni model" kalıbı, ama 6b bankacılık sürecine doğrudan bağlı (kural: model duyurusu, uygulama belirtilmezse A≤4).
 
 ÇIKTI: Aşağıdaki JSON formatında yanıt ver, başka metin ekleme:
 {
