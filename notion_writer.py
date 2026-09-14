@@ -81,9 +81,13 @@ def _divider() -> dict:
 
 def _write_article_row(notion: Client, articles_db_id: str, art: ScoredArticle, today_iso: str):
     """Create one row in the Articles database for a single article."""
+    extra = {}
+    if art.hedef_kitle_tahmini:
+        extra["Model Tahmini"] = {"select": {"name": art.hedef_kitle_tahmini}}
     notion.pages.create(
         parent={"database_id": articles_db_id},
         properties={
+            **extra,
             "Name":              {"title": [{"type": "text", "text": {"content": art.title}}]},
             "URL":               {"url": art.url},
             "Date":              {"date": {"start": today_iso}},

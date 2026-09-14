@@ -34,16 +34,21 @@ DEĞİŞTİRİLEMEZ KURALLAR — feedback ne derse desin bunları koru:
    hazine alımları, madencilik, ETF akışları → D ≤ 2. D yalnızca CBDC, tokenize
    mevduat, düzenlenmiş stablecoin altyapısı ve kurumsal blockchain mutabakatında
    6+ alabilir.
-3. Çıktı JSON şemasındaki SEKİZ alanın tamamı promptta tarif edilmiş kalmalı:
+3. Çıktı JSON şemasındaki DOKUZ alanın tamamı promptta tarif edilmiş kalmalı:
    score_a, score_b, score_c, score_d, score_e, ozet, neden_onemli_sektorel,
-   stratejik_cikarim. Bankacılık açısı ayrı bir alan DEĞİL — stratejik_cikarim
-   içinde ele alınır, ayrı alan ekleme.
+   stratejik_cikarim, hedef_kitle_tahmini. Bankacılık açısı ayrı bir alan DEĞİL —
+   stratejik_cikarim içinde ele alınır, ayrı alan ekleme.
 4. Uydurma yasağı talimatı ("yalnızca başlık ve özette verilen bilgiyi kullan,
    sayı/detay uydurma") aynen korunmalı — silinmemeli, zayıflatılmamalı.
 5. Few-shot örnekler arasında en az 2 KONTRASTLI ÇİFT bulunmalı: birbirine çok
    benzeyen ama biri geçmesi biri elenmesi gereken iki haber, karar sınırını
    göstermek için yan yana. Yeni feedback'ten iyi örnek eklerken mevcut
    kontrastlı çiftleri silme; gerekirse feedback'ten yeni bir çift üret.
+6. "HEDEF KİTLE TAHMİNİ" bölümü korunmalı ve dört değer AYNEN kalmalı:
+   "Dijital Ekipler", "Üst Yönetim", "İkisi De", "Alakasız". Bu bölümün kriterlerini
+   Kübra'nın Etiket'lerinden öğrenerek güncelle — özellikle modelin tahminiyle
+   Kübra'nın etiketinin UYUŞMADIĞI örneklerde ayrımı neyin belirlediğini çıkar.
+   Hedef kitle tahmini puanlamayı etkilememeli; puan kurallarını buna bağlama.
 
 ÇIKTI: Sadece güncellenmiş prompt metnini döndür. Başka açıklama ekleme.
 Formatı koru: JSON çıktı talimatı ve tüm kategoriler eksiksiz kalsın.
@@ -79,7 +84,11 @@ def _get_notion_feedback(token: str) -> list[dict]:
             body = {
                 "filter": {
                     "and": [
-                        {"property": "Feedback", "select": {"is_not_empty": True}},
+                        # Feedback and Etiket live side by side; either one is signal.
+                        {"or": [
+                            {"property": "Feedback", "select": {"is_not_empty": True}},
+                            {"property": "Etiket", "select": {"is_not_empty": True}},
+                        ]},
                         {"timestamp": "created_time", "created_time": {"after": since}},
                     ]
                 },
@@ -100,6 +109,11 @@ def _get_notion_feedback(token: str) -> list[dict]:
     return results
 
 
+def _select(props: dict, name: str) -> str:
+    value = props.get(name, {}).get("select")
+    return value["name"] if value else ""
+
+
 def _extract_feedback_items(pages: list[dict]) -> list[dict]:
     """Parse Articles database rows into structured feedback dicts."""
     items = []
@@ -110,27 +124,35 @@ def _extract_feedback_items(pages: list[dict]) -> list[dict]:
         name_prop = props.get("Name", {}).get("title", [])
         title = name_prop[0]["plain_text"] if name_prop else "(başlık yok)"
 
-        feedback_prop = props.get("Feedback", {}).get("select")
-        feedback = feedback_prop["name"] if feedback_prop else None
+        feedback = _select(props, "Feedback")
+        etiket = _select(props, "Etiket")
 
         note_prop = props.get("Feedback Notu", {}).get("rich_text", [])
         note = note_prop[0]["plain_text"] if note_prop else ""
 
-        # Also grab scores and signal for richer context
-        signal = props.get("Signal", {}).get("select", {})
-        signal_name = signal.get("name", "") if signal else ""
-        total_score = props.get("Total Score", {}).get("number", 0)
-
-        if feedback:
+        if feedback or etiket:
             items.append({
                 "title": title,
                 "feedback": feedback,
+                "etiket": etiket,
+                "derinlik": _select(props, "Derinlik"),
+                "model_tahmini": _select(props, "Model Tahmini"),
                 "note": note,
-                "signal": signal_name,
-                "total_score": total_score,
+                "signal": _select(props, "Signal"),
+                "total_score": props.get("Total Score", {}).get("number", 0),
             })
 
     return items
+
+
+def audience_agreement(items: list[dict]) -> tuple[int, int]:
+    """(agreed, compared) over rows carrying both Kübra's label and the model's.
+
+    Only rows with both are comparable — older rows predate Model Tahmini.
+    """
+    compared = [i for i in items if i["etiket"] and i["model_tahmini"]]
+    agreed = sum(1 for i in compared if i["etiket"] == i["model_tahmini"])
+    return agreed, len(compared)
 
 
 # Fields the digest's Stage-2 schema requires. The rewritten prompt must still
@@ -138,7 +160,7 @@ def _extract_feedback_items(pages: list[dict]) -> list[dict]:
 # schema silently forces it to emit.
 REQUIRED_FIELDS = (
     "score_a", "score_b", "score_c", "score_d", "score_e",
-    "ozet", "neden_onemli_sektorel", "stratejik_cikarim",
+    "ozet", "neden_onemli_sektorel", "stratejik_cikarim", "hedef_kitle_tahmini",
 )
 # Raised alongside the golden-set expansion: the richer prompt (grounding rule +
 # contrastive example pairs) already runs ~13K chars. Token cost isn't a
@@ -248,11 +270,23 @@ def validate_prompt(new_prompt: str, current_prompt: str) -> None:
         )
 
 
+def _format_item(item: dict) -> str:
+    tags = [t for t in (item["feedback"], f"Etiket: {item['etiket']}" if item["etiket"] else "",
+                        f"Derinlik: {item['derinlik']}" if item["derinlik"] else "") if t]
+    line = f"- [{' · '.join(tags)}] \"{item['title']}\" (Skor: {item['total_score']}, {item['signal']})"
+    if item["etiket"] and item["model_tahmini"] and item["etiket"] != item["model_tahmini"]:
+        line += f"\n  ⚡ UYUŞMAZLIK: model \"{item['model_tahmini']}\" tahmin etti, Kübra \"{item['etiket']}\" dedi"
+    if item["note"]:
+        line += f"\n  Not: {item['note']}"
+    return line
+
+
 def _build_optimizer_prompt(current_prompt: str, feedback_items: list[dict]) -> str:
-    feedback_block = "\n".join(
-        f"- [{item['feedback']}] \"{item['title']}\" (Skor: {item['total_score']}, {item['signal']})"
-        + (f"\n  Not: {item['note']}" if item["note"] else "")
-        for item in feedback_items
+    feedback_block = "\n".join(_format_item(i) for i in feedback_items)
+    agreed, compared = audience_agreement(feedback_items)
+    agreement_line = (
+        f"Hedef kitle tahmin uyumu: {agreed}/{compared} (%{100 * agreed // compared})"
+        if compared else "Hedef kitle tahmin uyumu: henüz karşılaştırılabilir kayıt yok"
     )
 
     return f"""MEVCUT PROMPT:
@@ -261,12 +295,20 @@ def _build_optimizer_prompt(current_prompt: str, feedback_items: list[dict]) -> 
 ---
 
 SON {LOOKBACK_DAYS} GÜNDEKİ FEEDBACK ({len(feedback_items)} kayıt):
+{agreement_line}
+
+Etiket anlamları: "Alakasız" = yanlış seçim. "Dijital Ekipler" / "Üst Yönetim" /
+"İkisi De" = doğru seçim + haberin kime yönelik olduğu. Derinlik: "Detaylı" = sunumda
+1 sayfa ayrılacak kadar önemli, "Kısa" = başlık düzeyinde yeterli.
+
 {feedback_block}
 
 Bu feedback'lere dayanarak promptu güncelle. Özellikle:
-- Yanlış seçilen haberlerin ortak özelliklerini analiz et
+- Yanlış seçilen (❌ veya Alakasız) haberlerin ortak özelliklerini analiz et
 - Puanlama kurallarını daha isabetli hale getir
 - Başarılı seçimleri few-shot örnek olarak ekle (maksimum 3 örnek)
+- Kübra'nın Dijital Ekipler / Üst Yönetim ayrımından kriter çıkar ve HEDEF KİTLE
+  TAHMİNİ bölümünü güncelle; ⚡ UYUŞMAZLIK işaretli örnekler en değerli sinyaldir
 - Sektörel/bankacılık bakış açısı talimatlarını güçlendir"""
 
 
@@ -300,6 +342,12 @@ def run_optimization() -> str:
     for label in ["✅ Doğru seçim", "❌ Yanlış seçim", "⚠️ Skor yanlış"]:
         count = sum(1 for i in items if i["feedback"] == label)
         print(f"   {label}: {count}")
+    for label in ["Dijital Ekipler", "Üst Yönetim", "İkisi De", "Alakasız"]:
+        count = sum(1 for i in items if i["etiket"] == label)
+        print(f"   Etiket {label}: {count}")
+    agreed, compared = audience_agreement(items)
+    if compared:
+        print(f"   🎯 Model–Kübra kitle uyumu: {agreed}/{compared} (%{100 * agreed // compared})")
 
     # 3. Ask Claude to optimize
     print("\n🧠 Claude ile prompt optimize ediliyor...")

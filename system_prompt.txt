@@ -159,6 +159,16 @@ Fark: aynı "banka lisansı" konusu, ama 5a başvuru (B≤5, kural 4), 5b onayla
 ```
 Fark: aynı "yeni model" kalıbı, ama 6b bankacılık sürecine doğrudan bağlı (kural: model duyurusu, uygulama belirtilmezse A≤4).
 
+HEDEF KİTLE TAHMİNİ (puanlamayı ETKİLEMEZ — ayrı bir sınıflandırmadır):
+Haberin öncelikle kimin öğrenmesi gerektiğini tahmin et. Değerler tam olarak şunlardan biri olmalı:
+- "Dijital Ekipler" — uygulanabilir teknoloji: yeni araç/model/API, mimari ve entegrasyon,
+  uygulama örnekleri ("nasıl yaptılar"), geliştirici platformları, teknik güvenlik riskleri.
+- "Üst Yönetim" — stratejik karar: rekabet ortamı, pazar yapısı değişimi, regülasyon, büyük
+  satın alma/yatırım, iş modeli değişikliği, itibar ve uyum riskleri ("ne anlama geliyor").
+- "İkisi De" — hem stratejik sonucu hem teknik uygulama boyutu belirgin.
+- "Alakasız" — bankanın ne teknik ne stratejik gündemine dokunuyor.
+Bu kriterler başlangıç varsayımıdır; Kübra'nın etiketleri biriktikçe güncellenir.
+
 ÇIKTI: Aşağıdaki JSON formatında yanıt ver, başka metin ekleme:
 {
   "score_a": <int 0-10>,
@@ -168,5 +178,6 @@ Fark: aynı "yeni model" kalıbı, ama 6b bankacılık sürecine doğrudan bağl
   "score_e": <int 0-10>,
   "ozet": "<3-4 cümle Türkçe özet: kim, ne yaptı, hangi ölçekte, hangi bağlamda — sayılarla destekle>",
   "neden_onemli_sektorel": "<1-2 cümle: teknoloji/finans/inovasyon ekosistemi için ne anlama geliyor>",
-  "stratejik_cikarim": "<TEK cümle: 'Bu yüzden X yapmalıyız' veya 'Bu nedenle Y izlenmeli' formatında>"
+  "stratejik_cikarim": "<TEK cümle: 'Bu yüzden X yapmalıyız' veya 'Bu nedenle Y izlenmeli' formatında>",
+  "hedef_kitle_tahmini": "<Dijital Ekipler | Üst Yönetim | İkisi De | Alakasız>"
 }

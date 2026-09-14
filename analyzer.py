@@ -89,6 +89,9 @@ STAGE1_SCHEMA = {
     "additionalProperties": False,
 }
 
+# Must match the "Etiket" / "Model Tahmini" select options in Notion exactly.
+AUDIENCE_LABELS = ("Dijital Ekipler", "Üst Yönetim", "İkisi De", "Alakasız")
+
 STAGE2_SCHEMA = {
     "type": "object",
     "properties": {
@@ -100,10 +103,11 @@ STAGE2_SCHEMA = {
         "ozet": {"type": "string"},
         "neden_onemli_sektorel": {"type": "string"},
         "stratejik_cikarim": {"type": "string"},
+        "hedef_kitle_tahmini": {"type": "string", "enum": list(AUDIENCE_LABELS)},
     },
     "required": [
         "score_a", "score_b", "score_c", "score_d", "score_e",
-        "ozet", "neden_onemli_sektorel", "stratejik_cikarim",
+        "ozet", "neden_onemli_sektorel", "stratejik_cikarim", "hedef_kitle_tahmini",
     ],
     "additionalProperties": False,
 }
@@ -136,6 +140,15 @@ class ScoredArticle:
     ozet: str = ""
     neden_onemli_sektorel: str = ""
     stratejik_cikarim: str = ""
+    # Written to a Notion column hidden from Kübra's view, so her label stays
+    # independent and model-vs-human agreement measures real learning.
+    hedef_kitle_tahmini: str = ""
+
+
+def _audience(data: dict) -> str:
+    """The model's audience guess, or "" if it came back outside the enum."""
+    value = data.get("hedef_kitle_tahmini", "")
+    return value if value in AUDIENCE_LABELS else ""
 
 
 def _compute_total(a: int, b: int, c: int, d: int, e: int) -> tuple[float, bool]:
@@ -294,6 +307,7 @@ def analyze_articles(
                     ozet=data.get("ozet", ""),
                     neden_onemli_sektorel=data.get("neden_onemli_sektorel", ""),
                     stratejik_cikarim=data.get("stratejik_cikarim", ""),
+                    hedef_kitle_tahmini=_audience(data),
                 )
             )
         except Exception as exc:
