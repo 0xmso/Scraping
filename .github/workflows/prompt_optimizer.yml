@@ -22,7 +22,16 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install 'anthropic[bedrock]>=0.125' notion-client python-dotenv
+        run: pip install 'anthropic[bedrock]>=0.125' notion-client python-dotenv httpx trafilatura lxml_html_clean feedparser
+
+      - name: Process pending example articles
+        env:
+          AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.AWS_BEARER_TOKEN_BEDROCK }}
+          AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_EXAMPLES_DB_ID: ${{ secrets.NOTION_EXAMPLES_DB_ID }}
+        run: python process_examples.py
 
       - name: Run prompt optimizer
         env:
@@ -35,12 +44,12 @@ jobs:
           NOTION_ARTICLES_DB_ID: ${{ secrets.NOTION_ARTICLES_DB_ID }}
         run: python prompt_optimizer.py
 
-      - name: Commit updated prompt
+      - name: Commit updated prompt and examples
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add system_prompt.txt
-          git diff --cached --quiet || git commit -m "chore: auto-update system_prompt.txt from feedback [skip ci]"
+          git add system_prompt.txt golden_articles.json
+          git diff --cached --quiet || git commit -m "chore: auto-update system_prompt.txt and golden set [skip ci]"
           git push
 
       - name: Report failure

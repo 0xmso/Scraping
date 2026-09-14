@@ -100,6 +100,10 @@
     {
       "title": "Klarna granted full banking license by German regulator",
       "summary": "Klarna received full banking license approval from Germany's BaFin, allowing it to offer deposit accounts directly rather than through a partner bank."
+    },
+    {
+      "title": "Worldline to accept agentic AI payments",
+      "summary": "Worldline, a major European payment processor, announced it will begin accepting agentic AI payments — transactions initiated by AI agents acting on behalf of consumers — across its merchant network starting next quarter. The rollout includes new authentication standards specifically designed for non-human payment initiators, developed in coordination with several major card networks."
     }
   ],
   "must_fail": [
