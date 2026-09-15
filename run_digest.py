@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
+import knowledge_base
 import llm
 from fetcher import fetch_raw_articles
 from dedup import filter_new_articles
@@ -57,8 +58,9 @@ def main() -> int:
 
     # ── 2. Analyze ────────────────────────────────────────────────────────────
     print("🧠 Claude ile analiz ediliyor...")
+    kb = knowledge_base.load_safely()
     scored = analyze_articles(
-        raw_articles, min_total=MIN_TOTAL, max_results=MAX_RESULTS
+        raw_articles, min_total=MIN_TOTAL, max_results=MAX_RESULTS, knowledge_base=kb
     )
 
     # ── 3. Report ─────────────────────────────────────────────────────────────

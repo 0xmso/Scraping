@@ -208,25 +208,36 @@ def behavioural_check(new_prompt: str) -> None:
     client = llm.get_client()
     failures: list[str] = []
 
-    for bucket, should_pass in (("must_pass", True), ("must_fail", False)):
-        for item in golden.get(bucket, []):
-            art = RawArticle(
-                title=item["title"], url="", summary=item["summary"],
-                published=None, source="golden",
-            )
-            try:
-                data = _deep_analyze(client, art, new_prompt)
-                total, _ = _compute_total(*_scores(data))
-            except Exception as exc:
-                failures.append(f"{item['title'][:45]} — puanlanamadı ({exc})")
-                continue
+    # Score the way production does — with retrieved labelled examples — so the
+    # gate tests the prompt as it will actually run.
+    import knowledge_base
+    from analyzer import knowledge_base_block
 
-            passed = total >= MIN_TOTAL
-            mark = "✓" if passed == should_pass else "✗"
-            print(f"   {mark} {total:5.0f}pt  {item['title'][:52]}")
-            if passed != should_pass:
-                want = f"≥{MIN_TOTAL}" if should_pass else f"<{MIN_TOTAL}"
-                failures.append(f"{item['title'][:45]} → {total:.0f} (beklenen {want})")
+    cases = [
+        (RawArticle(title=item["title"], url="", summary=item["summary"],
+                    published=None, source="golden"), should_pass)
+        for bucket, should_pass in (("must_pass", True), ("must_fail", False))
+        for item in golden.get(bucket, [])
+    ]
+    kb = knowledge_base.load_safely()
+    found = kb.neighbours([a for a, _ in cases]) if kb else [[] for _ in cases]
+
+    for (art, should_pass), neighbours in zip(cases, found):
+        try:
+            data = _deep_analyze(
+                client, art, new_prompt, knowledge_base_block(neighbours, detailed=True)
+            )
+            total, _ = _compute_total(*_scores(data))
+        except Exception as exc:
+            failures.append(f"{art.title[:45]} — puanlanamadı ({exc})")
+            continue
+
+        passed = total >= MIN_TOTAL
+        mark = "✓" if passed == should_pass else "✗"
+        print(f"   {mark} {total:5.0f}pt  {art.title[:52]}")
+        if passed != should_pass:
+            want = f"≥{MIN_TOTAL}" if should_pass else f"<{MIN_TOTAL}"
+            failures.append(f"{art.title[:45]} → {total:.0f} (beklenen {want})")
 
     if len(failures) > max_failures:
         raise PromptRejected(
@@ -235,6 +246,66 @@ def behavioural_check(new_prompt: str) -> None:
         )
     if failures:
         print(f"   [WARN] {len(failures)}/{total_items} tolere edilen sapma: {failures[0]}")
+
+
+# Audience gate. Below this many audience-labelled rows the measured agreement is
+# noise, so the check stands down rather than rejecting on a handful of calls.
+AUDIENCE_MIN_SAMPLE = 12
+# How far agreement may fall versus the live prompt before a rewrite is rejected.
+AUDIENCE_MAX_DROP = 0.10
+AUDIENCE_SAMPLE_CAP = 40
+_AUDIENCE_TARGETS = {"Dijital Ekipler", "Üst Yönetim", "İkisi De", "Alakasız"}
+
+
+def audience_check(new_prompt: str, current_prompt: str) -> None:
+    """Reject a rewrite that makes the model worse at Kübra's audience split.
+
+    The golden set only checks scores, so a rewrite could quietly break the
+    Dijital Ekipler / Üst Yönetim distinction and still pass. This re-guesses the
+    audience for Kübra's labelled rows under both prompts and compares agreement
+    with her labels. Comparing against the live prompt (not a fixed bar) keeps the
+    gate meaningful while the criteria are still being learned.
+    """
+    import knowledge_base
+    from analyzer import _audience, _deep_analyze, knowledge_base_block
+    from fetcher import RawArticle
+
+    kb = knowledge_base.load_safely()
+    if kb is None:
+        return
+    labelled = [e for e in kb.examples
+                if e.origin == "Articles" and e.label in _AUDIENCE_TARGETS]
+    real_audience = [e for e in labelled if e.label != "Alakasız"]
+    if len(real_audience) < AUDIENCE_MIN_SAMPLE:
+        print(f"   [INFO] Kitle testi atlandı: {len(real_audience)} kitle etiketi var, "
+              f"en az {AUDIENCE_MIN_SAMPLE} gerekli.")
+        return
+
+    sample = labelled[-AUDIENCE_SAMPLE_CAP:]
+    articles = [RawArticle(title=e.title, url=e.url, summary=e.text, published=None,
+                           source="audience-check") for e in sample]
+    found = kb.neighbours(articles)
+    client = llm.get_client()
+
+    def agreement(prompt: str) -> float:
+        hits = 0
+        for ex, art, neighbours in zip(sample, articles, found):
+            try:
+                data = _deep_analyze(client, art, prompt, knowledge_base_block(neighbours, detailed=True))
+                hits += _audience(data) == ex.label
+            except Exception:
+                pass
+        return hits / len(sample)
+
+    current = agreement(current_prompt)
+    new = agreement(new_prompt)
+    print(f"   Kitle uyumu: mevcut prompt %{current*100:.0f} → yeni prompt %{new*100:.0f} "
+          f"({len(sample)} etiketli haber)")
+    if new < current - AUDIENCE_MAX_DROP:
+        raise PromptRejected(
+            f"kitle uyumu düştü: %{current*100:.0f} → %{new*100:.0f} "
+            f"(izin verilen düşüş %{AUDIENCE_MAX_DROP*100:.0f})"
+        )
 
 
 def validate_prompt(new_prompt: str, current_prompt: str) -> None:
@@ -374,6 +445,8 @@ def run_optimization() -> str:
 
     print("\n🧪 Davranış testi (golden set)...")
     behavioural_check(new_prompt)
+    print("\n🎯 Kitle testi...")
+    audience_check(new_prompt, current_prompt)
 
     # 5. Save updated prompt
     PROMPT_FILE.write_text(new_prompt, encoding="utf-8")

@@ -87,6 +87,44 @@ def has_credentials() -> bool:
     return use_bedrock() or bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
+# ── Embeddings ────────────────────────────────────────────────────────────────
+# Cohere Multilingual puts Turkish (Upcorn, Kübra's notes, our Turkish summaries)
+# and English headlines in one vector space, so a Turkish-summarised example can
+# match an English candidate. Bedrock-only: the first-party API has no embeddings.
+EMBED_MODEL = "cohere.embed-multilingual-v3"
+EMBED_BATCH = 96  # Cohere's per-request text limit
+
+
+def embed(texts: list[str], input_type: str) -> list[list[float]]:
+    """Unit-normalised embeddings, so a dot product is cosine similarity.
+
+    input_type: "search_document" for stored examples, "search_query" for the
+    article being looked up.
+    """
+    if not use_bedrock():
+        raise RuntimeError("Embedding yalnızca Bedrock backend'inde mevcut.")
+    import json
+    import math
+
+    import boto3
+
+    runtime = boto3.client(
+        "bedrock-runtime", region_name=os.environ.get("AWS_REGION", DEFAULT_AWS_REGION)
+    )
+    vectors: list[list[float]] = []
+    for i in range(0, len(texts), EMBED_BATCH):
+        body = {
+            "texts": [t[:2000] for t in texts[i:i + EMBED_BATCH]],
+            "input_type": input_type,
+            "truncate": "END",
+        }
+        resp = runtime.invoke_model(modelId=EMBED_MODEL, body=json.dumps(body))
+        for vec in json.loads(resp["body"].read())["embeddings"]:
+            norm = math.sqrt(sum(x * x for x in vec)) or 1.0
+            vectors.append([x / norm for x in vec])
+    return vectors
+
+
 # ── Token accounting ──────────────────────────────────────────────────────────
 # Every call adds to this so a run can report what it spent. Bedrock bills to
 # AWS credits, which are otherwise invisible from inside the job.

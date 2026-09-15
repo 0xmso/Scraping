@@ -173,6 +173,14 @@ def _signal_level(total: float) -> str:
     return "⚫ DÜŞÜK"
 
 
+def knowledge_base_block(found, detailed: bool) -> str:
+    """Calibration examples for one article, or "" when there are none."""
+    if not found:
+        return ""
+    from knowledge_base import format_block
+    return format_block(found, detailed=detailed)
+
+
 def _user_message(article: RawArticle) -> str:
     return f"Başlık: {article.title}\n\nKaynak Özeti: {article.summary or '(özet yok)'}"
 
@@ -189,7 +197,7 @@ def _scores(data: dict) -> tuple[int, int, int, int, int]:
     )
 
 
-def _quick_score(client, article: RawArticle) -> dict:
+def _quick_score(client, article: RawArticle, examples_block: str = "") -> dict:
     """Stage 1: cheap pre-filter — scores only, no Turkish analysis."""
     return llm.call_structured(
         client,
@@ -202,19 +210,22 @@ def _quick_score(client, article: RawArticle) -> dict:
                 "cache_control": {"type": "ephemeral"},
             }
         ],
-        user_content=_user_message(article),
+        user_content=examples_block + _user_message(article),
         schema=STAGE1_SCHEMA,
         tool_name="haber_puanla",
         tool_description="Haberi 5 kategoride 0-10 arası puanla.",
     )
 
 
-def _deep_analyze(client, article: RawArticle, system_prompt: str) -> dict:
+def _deep_analyze(
+    client, article: RawArticle, system_prompt: str, examples_block: str = ""
+) -> dict:
     """Stage 2: deep call — full Turkish analysis + final scoring.
 
     Stage 2 re-scores too: stage-1 scores were only a pre-filter, this is the
     authoritative scoring that drives the final output. The same system_prompt.txt
-    that's auto-tuned by the feedback loop is used here.
+    that's auto-tuned by the feedback loop is used here. Retrieved examples go in
+    the user message so the cached system prompt stays byte-identical.
     """
     return llm.call_structured(
         client,
@@ -227,7 +238,7 @@ def _deep_analyze(client, article: RawArticle, system_prompt: str) -> dict:
                 "cache_control": {"type": "ephemeral"},
             }
         ],
-        user_content=_user_message(article),
+        user_content=examples_block + _user_message(article),
         schema=STAGE2_SCHEMA,
         tool_name="haber_analiz",
         tool_description="Haberi puanla ve Türkçe stratejik analiz üret.",
@@ -240,17 +251,32 @@ def analyze_articles(
     raw_articles: list[RawArticle],
     min_total: float = THRESHOLD_ORTA,
     max_results: int = 10,
+    knowledge_base=None,
 ) -> list[ScoredArticle]:
     """Two-stage scoring pipeline.
 
     Stage 1: cheap model scores every candidate
     Stage 2: deep model analyzes only articles passing the safety-margin gate
+
+    With a knowledge_base, both stages see the most similar articles Kübra has
+    already labelled — which is also how Stage 1, whose prompt is static, learns.
     """
     client = llm.get_client()
     system_prompt = _load_system_prompt()
     print(f"   Backend: {llm.backend_name()}")
     print(f"   Modeller: {llm.model(STAGE1_TIER)} → {llm.model(STAGE2_TIER)}")
     print(f"   Prompt yüklendi: {_PROMPT_FILE.name} ({len(system_prompt)} karakter)")
+
+    neighbours: dict[int, list] = {}
+    if knowledge_base is not None:
+        try:
+            for art, found in zip(raw_articles, knowledge_base.neighbours(raw_articles)):
+                neighbours[id(art)] = found
+            with_examples = sum(1 for v in neighbours.values() if v)
+            print(f"   📚 {with_examples}/{len(raw_articles)} aday için benzer etiketli örnek bulundu")
+        except Exception as exc:
+            print(f"   [WARN] Örnek getirilemedi ({exc}) — örneksiz devam ediliyor.")
+            neighbours = {}
 
     # ── Stage 1: pre-filter ──────────────────────────────────────────────────
     stage1_pass: list[tuple[RawArticle, float]] = []
@@ -260,7 +286,9 @@ def analyze_articles(
 
     for i, art in enumerate(raw_articles, 1):
         try:
-            data = _quick_score(client, art)
+            data = _quick_score(
+                client, art, knowledge_base_block(neighbours.get(id(art)), detailed=False)
+            )
             a, b, c, d, e = _scores(data)
             total, _ = _compute_total(a, b, c, d, e)
             verdict = "✓ geçti" if total >= stage1_threshold else "✗ elendi"
@@ -282,7 +310,10 @@ def analyze_articles(
     scored: list[ScoredArticle] = []
     for i, art in enumerate(candidates, 1):
         try:
-            data = _deep_analyze(client, art, system_prompt)
+            data = _deep_analyze(
+                client, art, system_prompt,
+                knowledge_base_block(neighbours.get(id(art)), detailed=True),
+            )
             a, b, c, d, e = _scores(data)
             total, has_bonus = _compute_total(a, b, c, d, e)
 
