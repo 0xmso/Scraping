@@ -126,17 +126,16 @@ def unsupported_numbers(source: str, generated: str) -> list[str]:
     return list(dict.fromkeys(missing))
 
 
-def check(client, title: str, source: str, analysis: dict) -> list[dict]:
-    """Return unsupported claims as [{"iddia": ..., "neden": ...}]; [] when clean."""
-    generated = "\n\n".join(
-        f"{label}:\n{analysis.get(key, '')}"
-        for label, key in (
-            ("Özet", "ozet"),
-            ("Sektörel önem", "neden_onemli_sektorel"),
-            ("Stratejik çıkarım", "stratejik_cikarim"),
-        )
-        if analysis.get(key)
-    )
+# Two independent audits; a claim is shown only when both raise it. A single
+# audit flagged borderline items (a CEO title) on one run and not the next.
+# Matching is by embedding similarity because the two audits word the same
+# claim differently: measured paraphrases scored 0.67–0.94, distinct claims
+# about the same article at most 0.60.
+AUDIT_ROUNDS = 2
+AGREEMENT_SIM = 0.64
+
+
+def _audit(client, title: str, source: str, generated: str) -> list[dict]:
     data = llm.call_structured(
         client,
         model=llm.model(GROUNDING_TIER),
@@ -147,7 +146,50 @@ def check(client, title: str, source: str, analysis: dict) -> list[dict]:
         tool_name="iddia_denetimi",
         tool_description="Analizdeki kaynakta desteklenmeyen olgusal iddiaları listele.",
     )
-    claims = _normalise(data.get("desteklenmeyen_iddialar", []))
+    return _normalise(data.get("desteklenmeyen_iddialar", []))
+
+
+def agreed_claims(first: list[dict], second: list[dict]) -> list[dict]:
+    """Claims from `first` that `second` also raised, matched one-to-one."""
+    if not first or not second:
+        return []
+    vectors = llm.embed([c["iddia"] for c in first + second], "search_document")
+    a, b = vectors[:len(first)], vectors[len(first):]
+    pairs = sorted(
+        ((sum(x * y for x, y in zip(va, vb)), i, j) for i, va in enumerate(a) for j, vb in enumerate(b)),
+        reverse=True,
+    )
+    used_i, used_j, kept = set(), set(), []
+    for sim, i, j in pairs:
+        if sim < AGREEMENT_SIM:
+            break
+        if i not in used_i and j not in used_j:
+            used_i.add(i)
+            used_j.add(j)
+            kept.append(i)
+    return [first[i] for i in sorted(kept)]
+
+
+def check(client, title: str, source: str, analysis: dict) -> list[dict]:
+    """Return unsupported claims as [{"iddia": ..., "neden": ...}]; [] when clean."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    generated = "\n\n".join(
+        f"{label}:\n{analysis.get(key, '')}"
+        for label, key in (
+            ("Özet", "ozet"),
+            ("Sektörel önem", "neden_onemli_sektorel"),
+            ("Stratejik çıkarım", "stratejik_cikarim"),
+        )
+        if analysis.get(key)
+    )
+    with ThreadPoolExecutor(max_workers=AUDIT_ROUNDS) as pool:
+        rounds = list(pool.map(lambda _: _audit(client, title, source, generated), range(AUDIT_ROUNDS)))
+    try:
+        claims = agreed_claims(rounds[0], rounds[1])
+    except Exception:
+        # No embeddings (e.g. non-Bedrock backend): a single audit is still useful.
+        claims = rounds[0]
 
     already = " ".join(c["iddia"] for c in claims)
     for number in unsupported_numbers(f"{title}\n{source}", generated):
