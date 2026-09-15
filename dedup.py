@@ -19,6 +19,7 @@ candidates pass rather than blocking the digest.
 """
 
 import os
+import re
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
@@ -154,12 +155,104 @@ _SEMANTIC_SCHEMA = {
 }
 
 
+# Shortlisting. Embeddings alone can't decide "same event": on live data, pairs
+# the model judged duplicates scored 0.55–0.74 while distinct follow-ups reached
+# 0.70. But nothing below 0.50 was a duplicate, so embeddings pick each
+# candidate's few nearest stories and the model judges only those pairs — a
+# short, specific comparison instead of scanning one long list of titles.
+SHORTLIST_SIM = 0.50
+SHORTLIST_SEEN = 3
+SHORTLIST_PEERS = 2
+
+_PAIR_SYSTEM = """Sen bir haber tekrar dedektörüsün. Her ADAY haberin altında, ona en benzer
+bulunan birkaç haber listelenmiş (daha önce yayınlanmış olanlar ve aynı partide ondan önce
+gelen adaylar).
+
+Bir aday, listelenen haberlerden biriyle AYNI OLAYI anlatıyorsa TEKRAR sayılır (farklı
+kaynak, farklı dil veya farklı ifade olsa bile).
+
+TEKRAR DEĞİLDİR:
+- Aynı konudaki YENİ GELİŞME ("X yatırım görüşmesinde" → "X yatırımı tamamladı",
+  "Y açıklama yaptı" → "Z, Y'nin açıklamasına yanıt verdi")
+- Aynı şirketin FARKLI bir haberi ("OpenAI halka arz olmayacak" ≠ "OpenAI Pro aboneliği durdurdu")
+- Aynı temadaki farklı olay
+
+HER aday için ayrı bir karar yaz: aday kimliği (ör. "A5"), tekrar (true/false) ve tekrarsa
+aynı olayı anlatan listedeki haberin başlığı (ayni_olay). Emin değilsen tekrar=false."""
+
+_PAIR_SCHEMA = {
+    "type": "object",
+    "properties": {"kararlar": {"type": "array", "items": {
+        "type": "object",
+        "properties": {
+            "aday": {"type": "string"},
+            "tekrar": {"type": "boolean"},
+            "ayni_olay": {"type": "string"},
+        },
+        "required": ["aday", "tekrar", "ayni_olay"],
+        "additionalProperties": False,
+    }}},
+    "required": ["kararlar"],
+    "additionalProperties": False,
+}
+
+
+def _shortlists(articles: list[RawArticle], seen_titles: list[str]) -> dict[int, list[str]]:
+    """1-based candidate index -> nearby stories worth a same-event check."""
+    seen_vecs = llm.embed(seen_titles, "search_document") if seen_titles else []
+    cand_vecs = llm.embed([a.title for a in articles], "search_query")
+    dot = lambda x, y: sum(p * q for p, q in zip(x, y))
+    out = {}
+    for i, vec in enumerate(cand_vecs):
+        seen = sorted(((dot(vec, sv), t) for sv, t in zip(seen_vecs, seen_titles)), reverse=True)
+        peers = sorted(((dot(vec, cand_vecs[j]), j) for j in range(i)), reverse=True)
+        # No numbers on the nearby items: numbering them invited the model to
+        # return a nearby item's number instead of the candidate's.
+        near = [f"(daha önce yayınlandı) {t}" for s, t in seen[:SHORTLIST_SEEN] if s >= SHORTLIST_SIM]
+        near += [f"(bu partide önceki aday) {articles[j].title}"
+                 for s, j in peers[:SHORTLIST_PEERS] if s >= SHORTLIST_SIM]
+        if near:
+            out[i + 1] = near
+    return out
+
+
+def _duplicate_indices_by_pairs(client, articles, seen_titles) -> set[int]:
+    shortlists = _shortlists(articles, seen_titles)
+    if not shortlists:
+        return set()
+    blocks = []
+    for idx, near in shortlists.items():
+        lines = "\n".join(f"   - {n}" for n in near)
+        blocks.append(f"[A{idx}] {articles[idx - 1].title}\n{lines}")
+    data = llm.call_structured(
+        client,
+        model=llm.model(SEMANTIC_TIER),
+        max_tokens=4000,
+        system=_PAIR_SYSTEM,
+        user_content="\n\n".join(blocks),
+        schema=_PAIR_SCHEMA,
+        tool_name="tekrar_kararlari",
+        tool_description="Her aday için ayrı tekrar kararı.",
+    )
+    flagged = set()
+    for verdict in llm.coerce_list(data.get("kararlar")):
+        if not isinstance(verdict, dict):
+            continue
+        match = re.fullmatch(r"\[?A(\d+)\]?", str(verdict.get("aday", "")).strip())
+        if match and str(verdict.get("tekrar", "")).strip().lower() == "true" and verdict.get("ayni_olay"):
+            flagged.add(int(match.group(1)))
+    # Only shortlisted candidates can be duplicates; ignore anything else.
+    return flagged & set(shortlists)
+
+
 def semantic_filter(
     articles: list[RawArticle], seen_titles: list[str]
 ) -> tuple[list[RawArticle], int]:
     """Drop candidates that cover the same story as an already-posted article
-    (or as an earlier candidate in the same batch), using one cheap model call.
+    (or as an earlier candidate in the same batch).
 
+    Embedding shortlists + one model call over those pairs; if embeddings are
+    unavailable, falls back to a single call over the full title lists.
     Returns (fresh_articles, skipped_count). Fails open on any error.
     """
     if not articles:
@@ -169,6 +262,13 @@ def semantic_filter(
         print("   [WARN] Model kimlik bilgisi yok — semantik tekrar kontrolü atlandı.")
         return articles, 0
 
+    client = llm.get_client()
+    try:
+        dup_indices = _duplicate_indices_by_pairs(client, articles, seen_titles)
+        return _apply(articles, dup_indices)
+    except Exception as exc:
+        print(f"   [WARN] Embedding tabanlı tekrar kontrolü yapılamadı ({exc}) — tam liste yöntemine geçiliyor.")
+
     try:
         seen_block = "\n".join(f"- {t}" for t in seen_titles) or "(yok)"
         cand_block = "\n".join(f"{i}. {a.title}" for i, a in enumerate(articles, 1))
@@ -177,7 +277,6 @@ def semantic_filter(
             f"ADAY HABERLER:\n{cand_block}"
         )
 
-        client = llm.get_client()
         data = llm.call_structured(
             client,
             model=llm.model(SEMANTIC_TIER),
@@ -195,7 +294,10 @@ def semantic_filter(
     except Exception as exc:
         print(f"   [WARN] Semantik tekrar kontrolü başarısız ({exc}) — tüm adaylar geçiyor.")
         return articles, 0
+    return _apply(articles, dup_indices)
 
+
+def _apply(articles: list[RawArticle], dup_indices: set[int]) -> tuple[list[RawArticle], int]:
     fresh: list[RawArticle] = []
     skipped = 0
     for i, art in enumerate(articles, 1):
