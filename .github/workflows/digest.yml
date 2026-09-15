@@ -19,7 +19,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install feedparser notion-client 'anthropic[bedrock]>=0.125' python-dotenv
+        run: pip install feedparser notion-client 'anthropic[bedrock]>=0.125' python-dotenv httpx trafilatura lxml_html_clean
 
       - name: Run digest
         env:

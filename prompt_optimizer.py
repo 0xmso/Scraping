@@ -359,7 +359,53 @@ def _format_item(item: dict) -> str:
     return line
 
 
-def _build_optimizer_prompt(current_prompt: str, feedback_items: list[dict]) -> str:
+MAX_GROUNDING_EXAMPLES = 25
+
+
+def _get_grounding_flags(token: str) -> list[dict]:
+    """Recent articles whose analysis the grounding check flagged, with the claims.
+
+    Unlike feedback these need no human label, so they are read separately: a
+    recurring kind of unsourced addition is a prompt problem the rewrite can fix.
+    """
+    since = (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).isoformat()
+    url = f"https://api.notion.com/v1/databases/{_get_articles_db_id()}/query"
+    headers = {"Authorization": f"Bearer {token}", "Notion-Version": NOTION_VERSION,
+               "Content-Type": "application/json"}
+    body = {
+        "filter": {"and": [
+            {"property": "Uydurma Kontrolü", "select": {"equals": "Şüpheli"}},
+            {"timestamp": "created_time", "created_time": {"after": since}},
+        ]},
+        "sorts": [{"timestamp": "created_time", "direction": "descending"}],
+        "page_size": MAX_GROUNDING_EXAMPLES,
+    }
+    resp = httpx.post(url, headers=headers, json=body, timeout=30)
+    resp.raise_for_status()
+    flags = []
+    for page in resp.json().get("results", []):
+        props = page["properties"]
+        title = "".join(b["plain_text"] for b in props.get("Name", {}).get("title", []))
+        claims = "".join(b["plain_text"] for b in props.get("Şüpheli İddialar", {}).get("rich_text", []))
+        if claims:
+            flags.append({"title": title, "claims": claims})
+    return flags
+
+
+def _grounding_block(flags: list[dict]) -> str:
+    if not flags:
+        return ""
+    lines = [f"\nUYDURMA KONTROLÜ İŞARETLERİ (son {LOOKBACK_DAYS} gün, {len(flags)} haber):",
+             "Analiz metinlerinde kaynakta olmayan şu ifadeler tespit edildi:"]
+    for f in flags:
+        lines.append(f"- \"{f['title'][:90]}\"")
+        lines += [f"    {c[:220]}" for c in f["claims"].splitlines()[:4]]
+    return "\n".join(lines) + "\n"
+
+
+def _build_optimizer_prompt(
+    current_prompt: str, feedback_items: list[dict], grounding_flags: list[dict] = ()
+) -> str:
     feedback_block = "\n".join(_format_item(i) for i in feedback_items)
     agreed, compared = audience_agreement(feedback_items)
     agreement_line = (
@@ -380,8 +426,11 @@ Etiket anlamları: "Alakasız" = yanlış seçim. "Dijital Ekipler" / "Üst Yön
 1 sayfa ayrılacak kadar önemli, "Kısa" = başlık düzeyinde yeterli.
 
 {feedback_block}
-
+{_grounding_block(list(grounding_flags))}
 Bu feedback'lere dayanarak promptu güncelle. Özellikle:
+- UYDURMA KONTROLÜ İŞARETLERİ varsa tekrarlayan ekleme türlerini (ör. "en büyük / lider"
+  nitelemeleri, kaynakta olmayan isim tamamlama, arka plan rolleri) tespit et ve UYDURMA
+  YASAĞI bölümüne o türü açıkça yasaklayan somut bir kural ekle
 - Yanlış seçilen (❌ veya Alakasız) haberlerin ortak özelliklerini analiz et
 - 🔻 KAÇIRILAN HABER işaretli örneklerin ortak özelliğini bul ve puanlama kurallarını
   bu tür haberlerin eşiği geçeceği şekilde düzelt (eleme hatası, seçme hatası kadar önemli)
@@ -413,9 +462,15 @@ def run_optimization() -> str:
     pages = _get_notion_feedback(notion_token)
     items = _extract_feedback_items(pages)
     print(f"   {len(items)} feedback kaydı bulundu.")
+    try:
+        flags = _get_grounding_flags(notion_token)
+    except Exception as exc:
+        print(f"   [WARN] Uydurma işaretleri okunamadı ({exc})")
+        flags = []
+    print(f"   {len(flags)} haberde uydurma işareti bulundu.")
 
-    if not items:
-        print("⚠️  Hiç feedback yok — prompt güncellenmedi.")
+    if not items and not flags:
+        print("⚠️  Hiç feedback veya uydurma işareti yok — prompt güncellenmedi.")
         return current_prompt
 
     # Break down by type
@@ -431,7 +486,7 @@ def run_optimization() -> str:
 
     # 3. Ask Claude to optimize
     print("\n🧠 Claude ile prompt optimize ediliyor...")
-    user_msg = _build_optimizer_prompt(current_prompt, items)
+    user_msg = _build_optimizer_prompt(current_prompt, items, flags)
 
     response = client.messages.create(
         model=llm.model("deep"),

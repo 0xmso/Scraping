@@ -124,7 +124,7 @@ class ScoredArticle:
     # Identity
     title: str
     url: str
-    raw_summary: str
+    raw_summary: str        # the text the analysis was written from (full article when fetched)
     published: Optional[datetime]
     source: str
     # Scores
@@ -148,6 +148,8 @@ class ScoredArticle:
     # "Seçildi" goes in the digest; "Sınırda"/"Rastgele" are rejected articles
     # written to Notion only, so Kübra's labels can show what the model missed.
     secim_tipi: str = "Seçildi"
+    image_url: Optional[str] = None
+    full_text: bool = False   # True when analysed from the fetched article, not the RSS excerpt
 
 
 def _audience(data: dict) -> str:
@@ -262,6 +264,35 @@ BORDERLINE_FLOOR = 30      # Stage-2 totals in [floor, min_total) count as near-
 RANDOM_COUNT = 1
 
 
+# Articles reaching deep analysis are fetched in full: from an RSS excerpt the
+# model fills gaps with background knowledge, which the grounding check flags.
+FULL_TEXT_CHARS = 8000
+FETCH_WORKERS = 6
+
+
+def _with_full_text(articles: list[RawArticle]) -> dict[int, tuple[RawArticle, Optional[str]]]:
+    """id(original) -> (article to analyse, lead image). Falls back to the excerpt."""
+    import dataclasses
+    from concurrent.futures import ThreadPoolExecutor
+
+    import article_text
+
+    def one(art: RawArticle):
+        try:
+            fetched = article_text.fetch(art.url, timeout=15)
+            return id(art), (dataclasses.replace(art, summary=fetched.text[:FULL_TEXT_CHARS]),
+                             fetched.image_url)
+        except Exception:
+            return id(art), (art, None)
+
+    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
+        result = dict(pool.map(one, articles))
+    fetched_count = sum(1 for a in articles if result[id(a)][0] is not a)
+    print(f"   📄 Tam metin: {fetched_count}/{len(articles)} makale çekildi "
+          f"(kalanı RSS özetiyle analiz edilecek)")
+    return result
+
+
 def _to_scored(art: RawArticle, data: dict, secim_tipi: str = "Seçildi") -> ScoredArticle:
     a, b, c, d, e = _scores(data)
     total, has_bonus = _compute_total(a, b, c, d, e)
@@ -352,13 +383,17 @@ def analyze_articles(
     # ── Stage 2: deep analysis ───────────────────────────────────────────────
     scored: list[ScoredArticle] = []
     near_misses: list[ScoredArticle] = []
-    for i, art in enumerate(candidates, 1):
+    enriched = _with_full_text(candidates)
+    for i, original in enumerate(candidates, 1):
+        art, image_url = enriched[id(original)]
         try:
             data = _deep_analyze(
                 client, art, system_prompt,
-                knowledge_base_block(neighbours.get(id(art)), detailed=True),
+                knowledge_base_block(neighbours.get(id(original)), detailed=True),
             )
             result = _to_scored(art, data)
+            result.image_url = image_url
+            result.full_text = art is not original
 
             if result.total_score < min_total:
                 print(f"   [{i:2}/{len(candidates)}] Eşik altı ({result.total_score:.0f}), elendi.")

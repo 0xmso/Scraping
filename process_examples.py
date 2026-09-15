@@ -15,11 +15,11 @@ added during the week is folded in before that run's prompt rewrite.
 
 import os
 import json
-import time
 from pathlib import Path
 
 import httpx
-import trafilatura
+
+import article_text
 
 import llm
 from analyzer import _deep_analyze, _compute_total, _scores
@@ -29,12 +29,6 @@ NOTION_VERSION = "2022-06-28"
 GOLDEN_FILE = Path(__file__).parent / "golden_articles.json"
 SYSTEM_PROMPT_FILE = Path(__file__).parent / "system_prompt.txt"
 
-# A plain requests-style UA gets blocked by some sites (bot fingerprinting);
-# a realistic browser UA does not. Same fix used elsewhere in this project.
-BROWSER_UA = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/125.0 Safari/537.36"
-)
 
 # What gets sent to Opus 5 as the "source excerpt" — generous since this
 # pipeline fetches full article text, not a ≤600-char RSS blurb.
@@ -101,38 +95,17 @@ def _mark_error(token: str, page_id: str, message: str) -> None:
 
 
 def extract_article(url: str) -> tuple[str, str]:
-    """Fetch a URL and return (title, article_text). Raises on failure.
-
-    Retries once on 429/503 (transient rate limiting) before giving up. A
-    Cloudflare-style JS challenge (some sites, e.g. Finextra) can't be solved
-    by retrying — plain HTTP fetch has no JS engine — so that case gets a
-    specific, actionable error instead of a generic status code.
-    """
-    resp = None
-    for attempt in range(2):
-        resp = httpx.get(url, headers={"User-Agent": BROWSER_UA}, timeout=20, follow_redirects=True)
-        if resp.status_code in (429, 503) and attempt == 0:
-            time.sleep(4)
-            continue
-        break
-
-    if "Just a moment" in resp.text[:2000] or "challenges.cloudflare.com" in resp.text[:2000]:
+    """Fetch a URL and return (title, article_text). Raises on failure."""
+    try:
+        art = article_text.fetch(url)
+    except article_text.FetchBlocked:
         raise ValueError(
             "site bot koruması (Cloudflare) gösteriyor — bu kaynaktan otomatik "
             "çekilemiyor, makale metnini elle 'Özet' alanına yapıştırman gerekir"
-        )
-    resp.raise_for_status()
-
-    text = trafilatura.extract(resp.text)
-    if not text or len(text) < 200:
-        raise ValueError("makale metni çıkarılamadı veya çok kısa (paywall/JS olabilir)")
-
-    meta = trafilatura.extract_metadata(resp.text)
-    title = (meta.title if meta and meta.title else "").strip()
-    if not title:
+        ) from None
+    if not art.title:
         raise ValueError("sayfadan başlık çıkarılamadı")
-
-    return title, text
+    return art.title, art.text
 
 
 def _truncate_to_sentence(text: str, max_chars: int) -> str:

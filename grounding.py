@@ -52,7 +52,9 @@ gibi nitelemeleri AYRI birer iddia olarak MUTLAKA kontrol et. Örnek: "22 milyon
 kullanıcısıyla rekabeti artırabilir" → "rekabeti artırabilir" yorumdur ama "22 milyon
 kullanıcı" kaynakta yoksa işaretlenir.
 
-Şüpheli iddia yoksa listeyi boş döndür. Emin olmadığın durumda iddiayı işaretleme."""
+Listeye YALNIZCA kaynakta desteklenmediğine karar verdiğin iddiaları koy ve her birinde
+destekleniyor=false yaz. İncelediğin ama desteklendiğini gördüğün iddiaları listeye
+EKLEME. Şüpheli iddia yoksa listeyi boş döndür. Emin olmadığın durumda işaretleme."""
 
 _SCHEMA = {
     "type": "object",
@@ -63,9 +65,10 @@ _SCHEMA = {
                 "type": "object",
                 "properties": {
                     "iddia": {"type": "string"},
+                    "destekleniyor": {"type": "boolean"},
                     "neden": {"type": "string"},
                 },
-                "required": ["iddia", "neden"],
+                "required": ["iddia", "destekleniyor", "neden"],
                 "additionalProperties": False,
             },
         },
@@ -164,6 +167,10 @@ def _normalise(raw) -> list[dict]:
     """
     claims = []
     for item in llm.coerce_list(raw):
+        # The auditor sometimes lists claims it examined and found supported;
+        # its own verdict wins over its presence in the list.
+        if isinstance(item, dict) and str(item.get("destekleniyor", "false")).strip().lower() == "true":
+            continue
         if isinstance(item, dict) and item.get("iddia"):
             claims.append({"iddia": str(item["iddia"]), "neden": str(item.get("neden", ""))})
         elif isinstance(item, str) and item.strip():

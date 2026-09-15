@@ -81,7 +81,12 @@ def _divider() -> dict:
 
 def _write_article_row(notion: Client, articles_db_id: str, art: ScoredArticle, today_iso: str):
     """Create one row in the Articles database for a single article."""
-    extra = {"Seçim Tipi": {"select": {"name": art.secim_tipi}}}
+    extra = {
+        "Seçim Tipi": {"select": {"name": art.secim_tipi}},
+        "Tam Metin": {"checkbox": art.full_text},
+    }
+    if art.image_url:
+        extra["Görsel"] = {"url": art.image_url[:2000]}
     if art.hedef_kitle_tahmini:
         extra["Model Tahmini"] = {"select": {"name": art.hedef_kitle_tahmini}}
     if art.supheli_iddialar is not None:
