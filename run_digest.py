@@ -18,6 +18,7 @@ load_dotenv(Path(__file__).parent / ".env")
 
 import knowledge_base
 import llm
+import metrics
 from fetcher import fetch_raw_articles
 from dedup import filter_new_articles
 from analyzer import analyze_articles
@@ -96,6 +97,7 @@ def main() -> int:
     print("\n📝 Notion'a yazılıyor...")
     page_url = create_digest_page(scored, total_scanned, len(raw_articles), review_sample)
     print(f"\n🎉 Tamamlandı! → {page_url}")
+    metrics.record_safely()
 
     return _finish(warnings)
 

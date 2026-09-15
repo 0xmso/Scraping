@@ -31,6 +31,7 @@ jobs:
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           NOTION_ARTICLES_DB_ID: ${{ secrets.NOTION_ARTICLES_DB_ID }}
           NOTION_EXAMPLES_DB_ID: ${{ secrets.NOTION_EXAMPLES_DB_ID }}
+          NOTION_METRICS_DB_ID: ${{ secrets.NOTION_METRICS_DB_ID }}
         run: python run_digest.py
 
       - name: Report failure
