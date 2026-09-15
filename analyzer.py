@@ -392,7 +392,7 @@ def analyze_articles(
                 knowledge_base_block(neighbours.get(id(original)), detailed=True),
             )
             result = _to_scored(art, data)
-            result.image_url = image_url
+            result.image_url = image_url or original.image_url   # page image, else the feed's
             result.full_text = art is not original
 
             if result.total_score < min_total:
@@ -435,7 +435,9 @@ def _review_sample(client, system_prompt, near_misses, stage1_rejects, neighbour
                 client, art, system_prompt,
                 knowledge_base_block(neighbours.get(id(art)), detailed=True),
             )
-            sample.append(_to_scored(art, data, secim_tipi="Rastgele"))
+            scored_art = _to_scored(art, data, secim_tipi="Rastgele")
+            scored_art.image_url = art.image_url
+            sample.append(scored_art)
         except Exception as exc:
             print(f"   [WARN] Rastgele örnek analiz edilemedi ({exc})")
 

@@ -56,6 +56,28 @@ class RawArticle:
     summary: str          # raw RSS excerpt (≤600 chars)
     published: Optional[datetime]
     source: str
+    image_url: Optional[str] = None   # from the feed itself, when it carries one
+
+
+_IMG_TAG = re.compile(r'<img[^>]+src="([^"]+)"')
+
+
+def _feed_image(entry) -> Optional[str]:
+    """Image the feed attaches to an item (CoinDesk, VentureBeat, Upcorn do).
+
+    Used when the article page itself can't be fetched. VentureBeat serves a
+    300px/30%-quality thumbnail via query params; stripping them returns the
+    full-size asset from the same CDN.
+    """
+    candidates = [m.get("url") for m in entry.get("media_content", []) + entry.get("media_thumbnail", [])]
+    candidates += [e.get("href") or e.get("url") for e in entry.get("enclosures", [])
+                   if str(e.get("type", "")).startswith("image")]
+    html = entry.get("summary", "") + "".join(c.get("value", "") for c in entry.get("content", []))
+    candidates += _IMG_TAG.findall(html)
+    url = next((c for c in candidates if c and c.startswith("http")), None)
+    if url and "images.ctfassets.net" in url:
+        url = url.split("?", 1)[0]
+    return url
 
 
 def _clean(text: str) -> str:
@@ -140,6 +162,7 @@ def fetch_raw_articles(
                         summary=summary,
                         published=_parse_date(entry),
                         source=source,
+                        image_url=_feed_image(entry),
                     )
                 )
                 if len(collected) >= feed_cap:

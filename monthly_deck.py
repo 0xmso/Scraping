@@ -171,8 +171,9 @@ _DETAIL_SCHEMA = {
             "type": "object",
             "properties": {"baslik": {"type": "string"}, "aciklama": {"type": "string"}},
             "required": ["baslik", "aciklama"], "additionalProperties": False}},
+        "sirket_alan_adi": {"type": "string"},
     },
-    "required": ["baslik", "ozet_maddeleri", "onemli"],
+    "required": ["baslik", "ozet_maddeleri", "onemli", "sirket_alan_adi"],
     "additionalProperties": False,
 }
 
@@ -210,7 +211,10 @@ def detail_copy(client, art: DeckArticle) -> dict:
             f"ne oldu, nasıl çalışıyor, ölçek/rakam\n"
             f"- onemli: tam 2 madde; baslik 1-3 kelime, en fazla {POINT_TITLE_ASK} karakter "
             f"(ör. \"Proaktif önlem\", \"Veri egemenliği\"); aciklama tek cümle, en fazla "
-            f"{POINT_DESC_ASK} karakter; bir banka dijital ekibi için neden önemli\n\n"
+            f"{POINT_DESC_ASK} karakter; bir banka dijital ekibi için neden önemli\n"
+            f"- sirket_alan_adi: haberin ana konusu olan şirketin resmi web alan adı (ör. "
+            f"\"worldline.com\"); yalnızca emin olduğunda doldur, değilse boş bırak (\"\"). "
+            f"Bu sadece logo bulmak için kullanılır, slayt metnine girmez.\n\n"
             f"BAŞLIK: {art.title}\n\nANALİZ ÖZETİ: {art.ozet}\nSEKTÖREL: {art.sektorel}\n"
             f"STRATEJİK ÇIKARIM: {art.stratejik}\n\nKAYNAK:\n{source[:8000]}"
         ),
@@ -220,6 +224,7 @@ def detail_copy(client, art: DeckArticle) -> dict:
     bullets = [_fit(b, BULLET_MAX) for b in llm.coerce_list(data.get("ozet_maddeleri")) if str(b).strip()]
     points = [p for p in llm.coerce_list(data.get("onemli")) if isinstance(p, dict)][:2]
     return {
+        "domain": _trusted_domain(data.get("sirket_alan_adi"), art),
         "baslik": _fit(data.get("baslik") or art.title, TITLE_MAX),
         "ozet": bullets[:BULLETS] or [_fit(art.ozet, BULLET_MAX)],
         "onemli": [{"baslik": _fit(p.get("baslik", ""), POINT_TITLE_MAX),
@@ -337,8 +342,9 @@ def _set_text(shape, text: str):
     runs[0].find(qn("a:t")).text = text
 
 
-def _replace_picture(slide, placeholder, image_bytes: Optional[bytes]):
-    left, top, width, height = placeholder.left, placeholder.top, placeholder.width, placeholder.height
+def _replace_picture(slide, placeholder, image_bytes: Optional[bytes], max_in: Optional[float] = None):
+    """Fit an image inside the placeholder's box, centred; max_in caps its longer side."""
+    left, top, box_w, box_h = placeholder.left, placeholder.top, placeholder.width, placeholder.height
     placeholder._element.getparent().remove(placeholder._element)
     if not image_bytes:
         return
@@ -347,10 +353,47 @@ def _replace_picture(slide, placeholder, image_bytes: Optional[bytes]):
         w, h = Image.open(io.BytesIO(image_bytes)).size
     except Exception:
         return
-    scale = min(width / w, height / h)
+    fit_w, fit_h = box_w, box_h
+    if max_in:
+        fit_w = fit_h = min(box_w, box_h, Inches(max_in))
+    scale = min(fit_w / w, fit_h / h)
     pw, ph = int(w * scale), int(h * scale)
-    slide.shapes.add_picture(io.BytesIO(image_bytes), left + (width - pw) // 2,
-                             top + (height - ph) // 2, pw, ph)
+    slide.shapes.add_picture(io.BytesIO(image_bytes), left + (box_w - pw) // 2,
+                             top + (box_h - ph) // 2, pw, ph)
+
+
+_DOMAIN = re.compile(r"^(?:[a-z0-9-]+\.)+[a-z]{2,}$")
+LOGO_MIN_PX = 128
+LOGO_MAX_IN = 2.2   # logos are small square marks; stretching one to the image box blurs it
+
+
+def _trusted_domain(domain, art: DeckArticle) -> Optional[str]:
+    """Accept the model's company domain only if its name appears in the article.
+
+    The domain is model knowledge, not source text. Requiring its first label
+    ("worldline" for worldline.com) to occur in the title or summary keeps a
+    wrong guess from putting another company's logo on the slide.
+    """
+    domain = str(domain or "").strip().lower().removeprefix("https://").removeprefix("http://")
+    domain = domain.removeprefix("www.").split("/", 1)[0]
+    if not _DOMAIN.match(domain):
+        return None
+    name = domain.split(".")[0].replace("-", "")
+    haystack = re.sub(r"[^a-z0-9]", "", f"{art.title} {art.ozet}".lower())
+    return domain if len(name) >= 3 and name in haystack else None
+
+
+def _logo(domain: Optional[str]) -> Optional[bytes]:
+    if not domain:
+        return None
+    data = _download(f"https://www.google.com/s2/favicons?domain={domain}&sz=256")
+    if not data:
+        return None
+    from PIL import Image
+    try:
+        return data if min(Image.open(io.BytesIO(data)).size) >= LOGO_MIN_PX else None
+    except Exception:
+        return None
 
 
 def _download(url: Optional[str]) -> Optional[bytes]:
@@ -371,7 +414,7 @@ def build_deck(template: Path, month_label: str, details: list[tuple[DeckArticle
     originals = list(prs.slides)
     proto_detail, proto_list = originals[PROTO_DETAIL - 1], originals[PROTO_LIST - 1]
     keep = [originals[PROTO_COVER - 1], originals[PROTO_DIVIDER - 1]]
-    added, missing_images = [], 0
+    added, missing_images, logo_count = [], 0, 0
 
     for art, copy_ in details:
         s = duplicate_slide(prs, proto_detail)
@@ -388,9 +431,14 @@ def build_deck(template: Path, month_label: str, details: list[tuple[DeckArticle
             else:
                 for box in (badge, title_box, desc_box):
                     box._element.getparent().remove(box._element)
-        image = _download(art.image_url)
-        missing_images += image is None
-        _replace_picture(s, _at(s, 3.6, 7.1, kind="picture"), image)
+        # Article image → company logo (small, not stretched) → leave the area empty.
+        image, logo = _download(art.image_url), None
+        if image is None:
+            logo = _logo(copy_.get("domain"))
+            logo_count += logo is not None
+        missing_images += image is None and logo is None
+        _replace_picture(s, _at(s, 3.6, 7.1, kind="picture"), image or logo,
+                         max_in=LOGO_MAX_IN if logo else None)
         added.append(s)
 
     # Ungrouped lines first, directly under "Öne çıkanlar": placed after a group
@@ -426,7 +474,7 @@ def build_deck(template: Path, month_label: str, details: list[tuple[DeckArticle
     out.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(out))
     return {"slides": len(keep) + len(added), "detail": len(details),
-            "list_pages": len(pages), "missing_images": missing_images}
+            "list_pages": len(pages), "missing_images": missing_images, "logos": logo_count}
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -477,6 +525,8 @@ def main() -> int:
     stats = build_deck(template, month_label, details, groups, out)
     print(f"\n✅ {out} · {stats['slides']} slayt ({stats['detail']} detay, "
           f"{stats['list_pages']} öne çıkanlar sayfası)")
+    if stats["logos"]:
+        print(f"   🏷️  {stats['logos']} detay slaytında görsel yerine şirket logosu kullanıldı")
     if stats["missing_images"]:
         print(f"   ⚠️  {stats['missing_images']} detay slaytında görsel bulunamadı, alan boş bırakıldı")
     print(f"💰 {llm.usage_summary()}")
