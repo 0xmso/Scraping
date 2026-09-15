@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 .DS_Store
 bankacilik_yedek.json
+
+# Team deck template and generated decks: internal content, never in this public repo
+*.pptx
+*.potx
+out/
