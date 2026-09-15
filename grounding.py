@@ -157,18 +157,13 @@ def _normalise(raw) -> list[dict]:
     """Coerce the claim list into dicts.
 
     Bedrock doesn't support strict tool use, so the schema isn't enforced: the
-    model sometimes returns the array JSON-encoded as a string, or items as bare
-    strings instead of {iddia, neden} objects.
+    model sometimes returns the array JSON-encoded as a string, items as bare
+    strings, or a string with tool-call markup leaked in around the JSON
+    ('<parameter name="desteklenmeyen_iddialar">[]'). Unparseable text is
+    treated as no claims — turning garbage into a "claim" is itself a false flag.
     """
-    import json
-
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except ValueError:
-            raw = [raw] if raw.strip() else []
     claims = []
-    for item in raw if isinstance(raw, list) else []:
+    for item in llm.coerce_list(raw):
         if isinstance(item, dict) and item.get("iddia"):
             claims.append({"iddia": str(item["iddia"]), "neden": str(item.get("neden", ""))})
         elif isinstance(item, str) and item.strip():

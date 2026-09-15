@@ -188,7 +188,10 @@ def semantic_filter(
             tool_name="tekrar_bildir",
             tool_description="Tekrar olan adayların numaralarını döndür.",
         )
-        dup_indices = set(data["duplicate_indices"])
+        dup_indices = {
+            int(x) for x in llm.coerce_list(data.get("duplicate_indices"))
+            if str(x).strip().lstrip("-").isdigit()
+        }
     except Exception as exc:
         print(f"   [WARN] Semantik tekrar kontrolü başarısız ({exc}) — tüm adaylar geçiyor.")
         return articles, 0

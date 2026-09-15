@@ -59,8 +59,10 @@ def main() -> int:
     # ── 2. Analyze ────────────────────────────────────────────────────────────
     print("🧠 Claude ile analiz ediliyor...")
     kb = knowledge_base.load_safely()
+    review_sample: list = []
     scored = analyze_articles(
-        raw_articles, min_total=MIN_TOTAL, max_results=MAX_RESULTS, knowledge_base=kb
+        raw_articles, min_total=MIN_TOTAL, max_results=MAX_RESULTS,
+        knowledge_base=kb, review_sample=review_sample,
     )
 
     # ── 3. Report ─────────────────────────────────────────────────────────────
@@ -92,7 +94,7 @@ def main() -> int:
 
     # ── 4. Write to Notion ────────────────────────────────────────────────────
     print("\n📝 Notion'a yazılıyor...")
-    page_url = create_digest_page(scored, total_scanned, len(raw_articles))
+    page_url = create_digest_page(scored, total_scanned, len(raw_articles), review_sample)
     print(f"\n🎉 Tamamlandı! → {page_url}")
 
     return _finish(warnings)

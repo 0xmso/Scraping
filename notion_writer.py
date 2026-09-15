@@ -81,7 +81,7 @@ def _divider() -> dict:
 
 def _write_article_row(notion: Client, articles_db_id: str, art: ScoredArticle, today_iso: str):
     """Create one row in the Articles database for a single article."""
-    extra = {}
+    extra = {"Seçim Tipi": {"select": {"name": art.secim_tipi}}}
     if art.hedef_kitle_tahmini:
         extra["Model Tahmini"] = {"select": {"name": art.hedef_kitle_tahmini}}
     if art.supheli_iddialar is not None:
@@ -175,7 +175,13 @@ def _write_digest_page(notion: Client, digest_db_id: str, articles: list[ScoredA
 
 # ── Public entry point ─────────────────────────────────────────────────────────
 
-def create_digest_page(articles: list[ScoredArticle], total_scanned: int, candidates: int) -> str:
+def create_digest_page(
+    articles: list[ScoredArticle],
+    total_scanned: int,
+    candidates: int,
+    review_sample: list[ScoredArticle] = (),
+) -> str:
+    """Write selected articles + review-sample rows to Articles; digest page gets selected only."""
     notion        = _get_client()
     digest_db_id  = _get_digest_db_id()
     articles_db_id = _get_articles_db_id()
@@ -184,8 +190,10 @@ def create_digest_page(articles: list[ScoredArticle], total_scanned: int, candid
     today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # 1. Write each article as a row in Articles database
-    print(f"   Articles tablosuna {len(articles)} satır yazılıyor...")
-    for art in articles:
+    rows = list(articles) + list(review_sample)
+    print(f"   Articles tablosuna {len(rows)} satır yazılıyor "
+          f"({len(articles)} seçilen + {len(review_sample)} inceleme örneği)...")
+    for art in rows:
         try:
             _write_article_row(notion, articles_db_id, art, today_iso)
         except Exception as exc:

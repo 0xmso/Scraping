@@ -137,6 +137,7 @@ def _extract_feedback_items(pages: list[dict]) -> list[dict]:
                 "etiket": etiket,
                 "derinlik": _select(props, "Derinlik"),
                 "model_tahmini": _select(props, "Model Tahmini"),
+                "secim_tipi": _select(props, "Seçim Tipi"),
                 "note": note,
                 "signal": _select(props, "Signal"),
                 "total_score": props.get("Total Score", {}).get("number", 0),
@@ -345,6 +346,12 @@ def _format_item(item: dict) -> str:
     tags = [t for t in (item["feedback"], f"Etiket: {item['etiket']}" if item["etiket"] else "",
                         f"Derinlik: {item['derinlik']}" if item["derinlik"] else "") if t]
     line = f"- [{' · '.join(tags)}] \"{item['title']}\" (Skor: {item['total_score']}, {item['signal']})"
+    if item["secim_tipi"] in ("Sınırda", "Rastgele"):
+        if item["etiket"] and item["etiket"] != "Alakasız":
+            line += (f"\n  🔻 KAÇIRILAN HABER: model bunu ELEDİ ({item['secim_tipi']} örneklem), "
+                     f"Kübra ise doğru seçim saydı — puanlama bu tür haberleri düşük tutuyor")
+        elif item["etiket"] == "Alakasız":
+            line += f"\n  ✔ Doğru eleme: model eledi, Kübra da alakasız dedi ({item['secim_tipi']} örneklem)"
     if item["etiket"] and item["model_tahmini"] and item["etiket"] != item["model_tahmini"]:
         line += f"\n  ⚡ UYUŞMAZLIK: model \"{item['model_tahmini']}\" tahmin etti, Kübra \"{item['etiket']}\" dedi"
     if item["note"]:
@@ -376,6 +383,8 @@ Etiket anlamları: "Alakasız" = yanlış seçim. "Dijital Ekipler" / "Üst Yön
 
 Bu feedback'lere dayanarak promptu güncelle. Özellikle:
 - Yanlış seçilen (❌ veya Alakasız) haberlerin ortak özelliklerini analiz et
+- 🔻 KAÇIRILAN HABER işaretli örneklerin ortak özelliğini bul ve puanlama kurallarını
+  bu tür haberlerin eşiği geçeceği şekilde düzelt (eleme hatası, seçme hatası kadar önemli)
 - Puanlama kurallarını daha isabetli hale getir
 - Başarılı seçimleri few-shot örnek olarak ekle (maksimum 3 örnek)
 - Kübra'nın Dijital Ekipler / Üst Yönetim ayrımından kriter çıkar ve HEDEF KİTLE

@@ -145,6 +145,9 @@ class ScoredArticle:
     hedef_kitle_tahmini: str = ""
     # None = check not run (e.g. it errored); "" = clean; otherwise the flagged claims.
     supheli_iddialar: Optional[str] = None
+    # "Seçildi" goes in the digest; "Sınırda"/"Rastgele" are rejected articles
+    # written to Notion only, so Kübra's labels can show what the model missed.
+    secim_tipi: str = "Seçildi"
 
 
 def _audience(data: dict) -> str:
@@ -249,11 +252,43 @@ def _deep_analyze(
     )
 
 
+# ── Review sample ─────────────────────────────────────────────────────────────
+# Feedback only covers what the model selected, so it can never learn what it
+# wrongly rejected. A few rejected articles go to Notion (not the digest) for
+# Kübra to label. Mostly near-misses, plus one random Stage-1 reject: uncertainty
+# sampling alone doesn't reliably beat random selection, so both are covered.
+BORDERLINE_COUNT = 2
+BORDERLINE_FLOOR = 30      # Stage-2 totals in [floor, min_total) count as near-misses
+RANDOM_COUNT = 1
+
+
+def _to_scored(art: RawArticle, data: dict, secim_tipi: str = "Seçildi") -> ScoredArticle:
+    a, b, c, d, e = _scores(data)
+    total, has_bonus = _compute_total(a, b, c, d, e)
+    return ScoredArticle(
+        title=art.title,
+        url=art.url,
+        raw_summary=art.summary,
+        published=art.published,
+        source=art.source,
+        score_a=a, score_b=b, score_c=c, score_d=d, score_e=e,
+        total_score=total,
+        has_bonus=has_bonus,
+        signal_level=_signal_level(total),
+        ozet=data.get("ozet", ""),
+        neden_onemli_sektorel=data.get("neden_onemli_sektorel", ""),
+        stratejik_cikarim=data.get("stratejik_cikarim", ""),
+        hedef_kitle_tahmini=_audience(data),
+        secim_tipi=secim_tipi,
+    )
+
+
 def analyze_articles(
     raw_articles: list[RawArticle],
     min_total: float = THRESHOLD_ORTA,
     max_results: int = 10,
     knowledge_base=None,
+    review_sample: Optional[list] = None,
 ) -> list[ScoredArticle]:
     """Two-stage scoring pipeline.
 
@@ -262,6 +297,9 @@ def analyze_articles(
 
     With a knowledge_base, both stages see the most similar articles Kübra has
     already labelled — which is also how Stage 1, whose prompt is static, learns.
+
+    If review_sample is a list, rejected articles chosen for Kübra's review are
+    appended to it (see BORDERLINE_COUNT / RANDOM_COUNT). Returns the selection.
     """
     client = llm.get_client()
     system_prompt = _load_system_prompt()
@@ -282,6 +320,7 @@ def analyze_articles(
 
     # ── Stage 1: pre-filter ──────────────────────────────────────────────────
     stage1_pass: list[tuple[RawArticle, float]] = []
+    stage1_rejects: list[RawArticle] = []
     stage1_threshold = min_total * STAGE1_SAFETY_MARGIN
     print(f"\n   🚀 Stage 1 — {len(raw_articles)} aday hızlı puanlanıyor"
           f" (eşik ≥ {stage1_threshold:.0f})...")
@@ -297,6 +336,8 @@ def analyze_articles(
             print(f"   [{i:2}/{len(raw_articles)}] {total:5.0f}pt {verdict} | {art.title[:60]}")
             if total >= stage1_threshold:
                 stage1_pass.append((art, total))
+            else:
+                stage1_rejects.append(art)
         except Exception as exc:
             print(f"   [{i:2}/{len(raw_articles)}] [HATA] {exc} — {art.title[:60]}")
 
@@ -310,39 +351,24 @@ def analyze_articles(
 
     # ── Stage 2: deep analysis ───────────────────────────────────────────────
     scored: list[ScoredArticle] = []
+    near_misses: list[ScoredArticle] = []
     for i, art in enumerate(candidates, 1):
         try:
             data = _deep_analyze(
                 client, art, system_prompt,
                 knowledge_base_block(neighbours.get(id(art)), detailed=True),
             )
-            a, b, c, d, e = _scores(data)
-            total, has_bonus = _compute_total(a, b, c, d, e)
+            result = _to_scored(art, data)
 
-            if total < min_total:
-                print(f"   [{i:2}/{len(candidates)}] Eşik altı ({total:.0f}), elendi.")
+            if result.total_score < min_total:
+                print(f"   [{i:2}/{len(candidates)}] Eşik altı ({result.total_score:.0f}), elendi.")
+                if result.total_score >= BORDERLINE_FLOOR:
+                    near_misses.append(result)
                 continue
 
-            level = _signal_level(total)
-            print(f"   [{i:2}/{len(candidates)}] {level} | {total:.0f}pt | {art.title[:60]}")
-
-            scored.append(
-                ScoredArticle(
-                    title=art.title,
-                    url=art.url,
-                    raw_summary=art.summary,
-                    published=art.published,
-                    source=art.source,
-                    score_a=a, score_b=b, score_c=c, score_d=d, score_e=e,
-                    total_score=total,
-                    has_bonus=has_bonus,
-                    signal_level=level,
-                    ozet=data.get("ozet", ""),
-                    neden_onemli_sektorel=data.get("neden_onemli_sektorel", ""),
-                    stratejik_cikarim=data.get("stratejik_cikarim", ""),
-                    hedef_kitle_tahmini=_audience(data),
-                )
-            )
+            print(f"   [{i:2}/{len(candidates)}] {result.signal_level} | "
+                  f"{result.total_score:.0f}pt | {art.title[:60]}")
+            scored.append(result)
         except Exception as exc:
             print(f"   [{i:2}/{len(candidates)}] [HATA] {exc}")
             continue
@@ -350,7 +376,38 @@ def analyze_articles(
     scored.sort(key=lambda a: a.total_score, reverse=True)
     selected = scored[:max_results]
     _check_grounding(client, selected)
+
+    if review_sample is not None:
+        review_sample.extend(_review_sample(
+            client, system_prompt, near_misses, stage1_rejects, neighbours
+        ))
     return selected
+
+
+def _review_sample(client, system_prompt, near_misses, stage1_rejects, neighbours) -> list[ScoredArticle]:
+    """Pick rejected articles for Kübra to label; never raises (fail open)."""
+    import random
+
+    sample: list[ScoredArticle] = []
+    for art in sorted(near_misses, key=lambda a: a.total_score, reverse=True)[:BORDERLINE_COUNT]:
+        art.secim_tipi = "Sınırda"
+        sample.append(art)
+
+    # Stage-1 rejects have no Turkish analysis yet, so each costs one deep call.
+    for art in random.sample(stage1_rejects, min(RANDOM_COUNT, len(stage1_rejects))):
+        try:
+            data = _deep_analyze(
+                client, art, system_prompt,
+                knowledge_base_block(neighbours.get(id(art)), detailed=True),
+            )
+            sample.append(_to_scored(art, data, secim_tipi="Rastgele"))
+        except Exception as exc:
+            print(f"   [WARN] Rastgele örnek analiz edilemedi ({exc})")
+
+    if sample:
+        print(f"\n   🎲 İnceleme örneklemi: " + ", ".join(
+            f"{s.secim_tipi} {s.total_score:.0f}pt" for s in sample))
+    return sample
 
 
 def _check_grounding(client, articles: list["ScoredArticle"]) -> None:
@@ -368,5 +425,7 @@ def _check_grounding(client, articles: list["ScoredArticle"]) -> None:
             art.supheli_iddialar = grounding.format_claims(claims)
             if claims:
                 print(f"   ⚠️  {len(claims)} şüpheli iddia | {art.title[:55]}")
+                for line in art.supheli_iddialar.splitlines():
+                    print(f"        {line[:160]}")
         except Exception as exc:
             print(f"   [WARN] Uydurma kontrolü yapılamadı ({exc}) | {art.title[:50]}")

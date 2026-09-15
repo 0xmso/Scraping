@@ -87,6 +87,29 @@ def has_credentials() -> bool:
     return use_bedrock() or bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
+def coerce_list(value) -> list:
+    """Recover a JSON array from a tool-input field.
+
+    Forced tool use isn't schema-enforced on Bedrock (no strict mode), so an
+    array field sometimes arrives JSON-encoded as a string, occasionally wrapped
+    in leaked tool-call markup: '<parameter name="x">[1, 3]'. Returns [] when
+    nothing parseable is there, rather than iterating a string's characters.
+    """
+    import json
+
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, str):
+        return []
+    text = value.strip()
+    start, end = text.find("["), text.rfind("]")
+    try:
+        parsed = json.loads(text[start:end + 1] if start != -1 and end > start else text)
+    except ValueError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
 # ── Embeddings ────────────────────────────────────────────────────────────────
 # Cohere Multilingual puts Turkish (Upcorn, Kübra's notes, our Turkish summaries)
 # and English headlines in one vector space, so a Turkish-summarised example can
