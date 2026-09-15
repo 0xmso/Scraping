@@ -84,6 +84,10 @@ def _write_article_row(notion: Client, articles_db_id: str, art: ScoredArticle, 
     extra = {}
     if art.hedef_kitle_tahmini:
         extra["Model Tahmini"] = {"select": {"name": art.hedef_kitle_tahmini}}
+    if art.supheli_iddialar is not None:
+        extra["Uydurma Kontrolü"] = {"select": {"name": "Şüpheli" if art.supheli_iddialar else "Temiz"}}
+        if art.supheli_iddialar:
+            extra["Şüpheli İddialar"] = {"rich_text": [{"type": "text", "text": {"content": art.supheli_iddialar[:2000]}}]}
     notion.pages.create(
         parent={"database_id": articles_db_id},
         properties={

@@ -143,6 +143,8 @@ class ScoredArticle:
     # Written to a Notion column hidden from Kübra's view, so her label stays
     # independent and model-vs-human agreement measures real learning.
     hedef_kitle_tahmini: str = ""
+    # None = check not run (e.g. it errored); "" = clean; otherwise the flagged claims.
+    supheli_iddialar: Optional[str] = None
 
 
 def _audience(data: dict) -> str:
@@ -346,4 +348,25 @@ def analyze_articles(
             continue
 
     scored.sort(key=lambda a: a.total_score, reverse=True)
-    return scored[:max_results]
+    selected = scored[:max_results]
+    _check_grounding(client, selected)
+    return selected
+
+
+def _check_grounding(client, articles: list["ScoredArticle"]) -> None:
+    """Flag (never drop) selected articles whose analysis asserts unsourced facts."""
+    import grounding
+
+    print(f"\n   🔍 Uydurma kontrolü — {len(articles)} seçilen haber...")
+    for art in articles:
+        try:
+            claims = grounding.check(client, art.title, art.raw_summary, {
+                "ozet": art.ozet,
+                "neden_onemli_sektorel": art.neden_onemli_sektorel,
+                "stratejik_cikarim": art.stratejik_cikarim,
+            })
+            art.supheli_iddialar = grounding.format_claims(claims)
+            if claims:
+                print(f"   ⚠️  {len(claims)} şüpheli iddia | {art.title[:55]}")
+        except Exception as exc:
+            print(f"   [WARN] Uydurma kontrolü yapılamadı ({exc}) | {art.title[:50]}")
