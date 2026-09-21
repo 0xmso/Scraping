@@ -125,17 +125,29 @@ def _query(body: dict) -> list[dict]:
             cursor = data["next_cursor"]
 
 
-def labelled_articles(after: date, through: date) -> list[DeckArticle]:
+DEPTH_EXCLUDE = "Hariç Tut"  # Etiket qualifies the article, but Kübra opted it out of this deck
+
+
+def labelled_articles(after: date, through: date) -> tuple[list[DeckArticle], int]:
+    """Returns (included articles, count excluded via Derinlik=Hariç Tut).
+
+    Etiket alone decides training/audience-gate eligibility; Derinlik=Hariç Tut
+    is a separate, deck-only opt-out so Kübra can keep labelling accurately
+    without every Dijital Ekipler/İkisi De article bloating the presentation.
+    """
     pages = _query({"page_size": 100, "filter": {"and": [
         {"or": [{"property": "Etiket", "select": {"equals": a}} for a in AUDIENCE]},
         {"property": "Date", "date": {"after": after.isoformat()}},
         {"property": "Date", "date": {"on_or_before": through.isoformat()}},
     ]}})
-    out = []
+    out, excluded = [], 0
     for page in pages:
         depth = (page["properties"].get("Derinlik", {}).get("select") or {}).get("name")
+        if depth == DEPTH_EXCLUDE:
+            excluded += 1
+            continue
         out.append(_row(page, depth or "Kısa"))  # unset depth → headline, never dropped
-    return out
+    return out, excluded
 
 
 def sample_articles(detailed: int = 3, short: int = 9) -> list[DeckArticle]:
@@ -497,8 +509,9 @@ def main() -> int:
         arts = sample_articles()
         print(f"🧪 Örnek mod: son 3 haftanın en yüksek skorlu {len(arts)} haberi")
     else:
-        arts = labelled_articles(after, through)
-        print(f"📅 Kapsam: {after:%d.%m.%Y} sonrası → {through:%d.%m.%Y} · {len(arts)} etiketli haber")
+        arts, excluded = labelled_articles(after, through)
+        print(f"📅 Kapsam: {after:%d.%m.%Y} sonrası → {through:%d.%m.%Y} · {len(arts)} etiketli haber"
+              + (f" · {excluded} 'Hariç Tut' ile çıkarıldı" if excluded else ""))
     if not arts:
         print("Kapsamda Dijital Ekipler / İkisi De etiketli haber yok — sunum üretilmedi.")
         return 1
