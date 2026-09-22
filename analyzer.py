@@ -47,6 +47,16 @@ THRESHOLD_ORTA = 55   # matches run_digest's min_total — anything selected is 
 # Keeps borderline cases alive so Stage 2 can re-score with full analysis.
 STAGE1_SAFETY_MARGIN = 0.7
 
+# Confidence-aware routing (TRACER-inspired, arXiv:2604.14531): a fixed score
+# threshold treats "confidently low" and "unsure, happened to score low" the
+# same way and drops both. Bedrock's forced-tool-use path doesn't expose
+# logprobs, so instead of the paper's computation-trace signal, Stage 1
+# self-reports confidence as a schema field. A "düşük" (low-confidence) reject
+# still gets a second look if its score clears this looser margin — catching
+# uncertain near-misses the fixed 0.7 threshold would silently drop, without
+# widening the net for candidates Stage 1 is confidently rejecting.
+STAGE1_UNCERTAIN_MARGIN = 0.5
+
 _PROMPT_FILE = Path(__file__).parent / "system_prompt.txt"
 
 
@@ -70,6 +80,12 @@ KURALLAR:
 - Token fiyat hareketleri, DeFi protokol güncellemeleri, cüzdan/borsa duyuruları,
   kripto hazine alım-satımları piyasa gürültüsüdür: D'yi 3'ün üstüne çıkarma
 
+GÜVEN: Puanlara ek olarak "yüksek" veya "düşük" güven seviyeni bildir.
+- "yüksek": haberin alakalı ya da alakasız olduğundan eminsin, kategori sınırları net
+- "düşük": haber sınırda kalıyor, başka bir bağlamda ya da tam metinle çok farklı
+  puanlanabilir, emin değilsin
+Güven puanları etkilemez, sadece ne kadar emin olduğunu bildirir.
+
 Sadece JSON döndür, başka metin ekleme."""
 
 
@@ -84,8 +100,9 @@ STAGE1_SCHEMA = {
         "score_c": {"type": "integer"},
         "score_d": {"type": "integer"},
         "score_e": {"type": "integer"},
+        "guven": {"type": "string", "enum": ["yüksek", "düşük"]},
     },
-    "required": ["score_a", "score_b", "score_c", "score_d", "score_e"],
+    "required": ["score_a", "score_b", "score_c", "score_d", "score_e", "guven"],
     "additionalProperties": False,
 }
 
@@ -353,8 +370,10 @@ def analyze_articles(
     stage1_pass: list[tuple[RawArticle, float]] = []
     stage1_rejects: list[RawArticle] = []
     stage1_threshold = min_total * STAGE1_SAFETY_MARGIN
+    uncertain_threshold = min_total * STAGE1_UNCERTAIN_MARGIN
+    uncertain_saves = 0
     print(f"\n   🚀 Stage 1 — {len(raw_articles)} aday hızlı puanlanıyor"
-          f" (eşik ≥ {stage1_threshold:.0f})...")
+          f" (eşik ≥ {stage1_threshold:.0f}, belirsizde ≥ {uncertain_threshold:.0f})...")
 
     for i, art in enumerate(raw_articles, 1):
         try:
@@ -363,14 +382,29 @@ def analyze_articles(
             )
             a, b, c, d, e = _scores(data)
             total, _ = _compute_total(a, b, c, d, e)
-            verdict = "✓ geçti" if total >= stage1_threshold else "✗ elendi"
-            print(f"   [{i:2}/{len(raw_articles)}] {total:5.0f}pt {verdict} | {art.title[:60]}")
+            confident = data.get("guven") != "düşük"
+
             if total >= stage1_threshold:
+                verdict = "✓ geçti"
+                passes = True
+            elif not confident and total >= uncertain_threshold:
+                verdict = "✓ belirsiz-geçti"
+                passes = True
+                uncertain_saves += 1
+            else:
+                verdict = "✗ elendi"
+                passes = False
+
+            print(f"   [{i:2}/{len(raw_articles)}] {total:5.0f}pt {verdict} | {art.title[:60]}")
+            if passes:
                 stage1_pass.append((art, total))
             else:
                 stage1_rejects.append(art)
         except Exception as exc:
             print(f"   [{i:2}/{len(raw_articles)}] [HATA] {exc} — {art.title[:60]}")
+
+    if uncertain_saves:
+        print(f"   ℹ️  {uncertain_saves} aday düşük güvenle elenmek üzereyken ikinci bakışa alındı")
 
     # Sort by stage-1 total desc; cap deep analyses to a generous multiple of max_results
     # to avoid wasting deep calls if stage 1 is too lenient
