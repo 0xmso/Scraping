@@ -167,6 +167,17 @@ Haberin öncelikle kimin öğrenmesi gerektiğini tahmin et. Değerler tam olara
   satın alma/yatırım, iş modeli değişikliği, itibar ve uyum riskleri ("ne anlama geliyor").
 - "İkisi De" — hem stratejik sonucu hem teknik uygulama boyutu belirgin.
 - "Alakasız" — bankanın ne teknik ne stratejik gündemine dokunuyor.
+
+AYRIM (Kübra'nın etiketlerinden öğrenilen kritik nokta): "yeni bir AI aracı/model duyurusu"
+olması TEK BAŞINA Dijital Ekipler'e işaret ETMEZ. Sor: bu bizim ekibin doğrudan
+deneyebileceği/entegre edebileceği bir şey mi, yoksa BAŞKA bir şirketin kendi ürünü,
+müşterisi veya iç süreci hakkında — biz sadece izleyici durumundaysak — bir haber mi?
+İkincisi Üst Yönetim'dir; araç/model içermesi onu Dijital Ekipler yapmaz.
+Örnek: "Anthropic, Claude Code Projects'i tanıttı" ve "OpenAI, hukuk sektörüne özel Astra
+for Law'u tanıttı" ikisi de Üst Yönetim — bizim kullanacağımız bir API değil, rakip/vendor
+ürün duyurusu. Açık kaynak bir kütüphane/API çıkıp biz de entegre edebiliyorsak, o zaman
+Dijital Ekipler'dir.
+
 Bu kriterler başlangıç varsayımıdır; Kübra'nın etiketleri biriktikçe güncellenir.
 
 ÇIKTI: Aşağıdaki JSON formatında yanıt ver, başka metin ekleme:
