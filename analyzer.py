@@ -369,6 +369,7 @@ def analyze_articles(
     # ── Stage 1: pre-filter ──────────────────────────────────────────────────
     stage1_pass: list[tuple[RawArticle, float]] = []
     stage1_rejects: list[RawArticle] = []
+    stage1_reject_guven: dict[int, str] = {}   # id(art) -> "yüksek"/"düşük", for _review_sample
     stage1_threshold = min_total * STAGE1_SAFETY_MARGIN
     uncertain_threshold = min_total * STAGE1_UNCERTAIN_MARGIN
     uncertain_saves = 0
@@ -400,6 +401,7 @@ def analyze_articles(
                 stage1_pass.append((art, total))
             else:
                 stage1_rejects.append(art)
+                stage1_reject_guven[id(art)] = data.get("guven", "yüksek")
         except Exception as exc:
             print(f"   [{i:2}/{len(raw_articles)}] [HATA] {exc} — {art.title[:60]}")
 
@@ -448,12 +450,14 @@ def analyze_articles(
 
     if review_sample is not None:
         review_sample.extend(_review_sample(
-            client, system_prompt, near_misses, stage1_rejects, neighbours
+            client, system_prompt, near_misses, stage1_rejects, neighbours, stage1_reject_guven
         ))
     return selected
 
 
-def _review_sample(client, system_prompt, near_misses, stage1_rejects, neighbours) -> list[ScoredArticle]:
+def _review_sample(
+    client, system_prompt, near_misses, stage1_rejects, neighbours, stage1_reject_guven=None
+) -> list[ScoredArticle]:
     """Pick rejected articles for Kübra to label; never raises (fail open)."""
     import random
 
@@ -462,8 +466,17 @@ def _review_sample(client, system_prompt, near_misses, stage1_rejects, neighbour
         art.secim_tipi = "Sınırda"
         sample.append(art)
 
+    # Uncertainty sampling: a "düşük" (low-confidence) Stage 1 rejection is where
+    # the model itself doubts its own call, so it's the most informative reject to
+    # put in front of Kübra — a label there is worth more than a label on a
+    # confidently-rejected article. Falls back to a plain random pick when no
+    # low-confidence rejects exist, same as before this signal was available.
+    guven = stage1_reject_guven or {}
+    uncertain = [a for a in stage1_rejects if guven.get(id(a)) == "düşük"]
+    pool = uncertain if uncertain else stage1_rejects
+
     # Stage-1 rejects have no Turkish analysis yet, so each costs one deep call.
-    for art in random.sample(stage1_rejects, min(RANDOM_COUNT, len(stage1_rejects))):
+    for art in random.sample(pool, min(RANDOM_COUNT, len(pool))):
         try:
             data = _deep_analyze(
                 client, art, system_prompt,
