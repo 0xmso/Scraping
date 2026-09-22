@@ -51,9 +51,17 @@ DEĞİŞTİRİLEMEZ KURALLAR — feedback ne derse desin bunları koru:
    Kübra'nın etiketinin UYUŞMADIĞI örneklerde ayrımı neyin belirlediğini çıkar.
    Hedef kitle tahmini puanlamayı etkilememeli; puan kurallarını buna bağlama.
 
-ÇIKTI: Sadece güncellenmiş prompt metnini döndür. Başka açıklama ekleme.
+ÇIKTI: Önce güncellenmiş prompt metnini eksiksiz döndür, başka açıklama katmadan.
 Formatı koru: JSON çıktı talimatı ve tüm kategoriler eksiksiz kalsın.
-Promptu eksiksiz bitir — JSON bloğunu kapatmadan bırakma."""
+Promptu eksiksiz bitir — JSON bloğunu kapatmadan bırakma.
+
+Prompt metni bittikten sonra yeni bir satırda tam olarak "===KANIT===" yaz, ardından
+bu turda eklediğin veya değiştirdiğin her kural/kriter için bir satır:
+- <kısaca ne değişti> → "<dayandığı gerçek feedback haberinin başlığı>"
+Birden fazla habere dayanıyorsa başlıkları " / " ile ayır. Bu bölüm system_prompt.txt'e
+YAZILMAYACAK, sadece denetim içindir — prompt metninin kendisine KESİNLİKLE karıştırma.
+Bir kural spesifik bir örneğe değil genel bir gözleme dayanıyorsa yine de en az bir
+temsilî başlık göster; hiçbir feedback kaydına dayanmıyorsa o kuralı ekleme."""
 
 
 def _get_articles_db_id() -> str:
@@ -313,6 +321,37 @@ def audience_check(new_prompt: str, current_prompt: str) -> None:
 # Matches "Örnek 1 — "..."" and "Örnek 4a (ELENMELİ) — "..."" alike.
 _EXAMPLE_QUOTE = re.compile(r'Örnek\s+\d+[a-z]?\s*(?:\([^)]*\))?\s*—\s*"([^"]{10,200})"')
 
+KANIT_MARKER = "===KANIT==="
+_CITATION_QUOTE = re.compile(r'"([^"]{10,200})"')
+
+
+def split_evidence(raw_response: str) -> tuple[str, str]:
+    """Split the model's raw response into (prompt_text, evidence_block).
+
+    The optimizer is asked to append a KANIT_MARKER section citing which real
+    feedback title backs each new/changed rule, kept out of the saved prompt so
+    citations never leak into what Stage 1/Stage 2 actually read at run time.
+    """
+    if KANIT_MARKER in raw_response:
+        prompt_text, _, evidence = raw_response.partition(KANIT_MARKER)
+        return prompt_text.strip(), evidence.strip()
+    return raw_response.strip(), ""
+
+
+def unsupported_rule_citations(evidence_block: str, feedback_items: list[dict]) -> list[str]:
+    """Citations in the KANIT block that don't name a real feedback title.
+
+    Same idea as unsupported_examples(), applied to rule/criteria changes
+    instead of few-shot examples: a generalization ("this type of article
+    tends to...") is easy for a model to assert and hard to verify semantically,
+    but cheap to verify if the model is made to name which real article it's
+    generalizing from.
+    """
+    if not evidence_block:
+        return []
+    known = {i["title"] for i in feedback_items}
+    return [t for t in _CITATION_QUOTE.findall(evidence_block) if t not in known]
+
 
 def unsupported_examples(new_prompt: str, current_prompt: str, feedback_items: list[dict]) -> list[str]:
     """Few-shot example headlines in the rewrite that cite no real article.
@@ -329,7 +368,9 @@ def unsupported_examples(new_prompt: str, current_prompt: str, feedback_items: l
     return [ex for ex in _EXAMPLE_QUOTE.findall(new_prompt) if ex not in known]
 
 
-def validate_prompt(new_prompt: str, current_prompt: str, feedback_items: list[dict]) -> None:
+def validate_prompt(
+    new_prompt: str, current_prompt: str, feedback_items: list[dict], evidence_block: str = ""
+) -> None:
     """Reject a rewritten prompt that would degrade the digest.
 
     Raises PromptRejected with the reason. The caller keeps the existing prompt.
@@ -365,6 +406,12 @@ def validate_prompt(new_prompt: str, current_prompt: str, feedback_items: list[d
     if fabricated:
         raise PromptRejected(
             "uydurma few-shot örnek(ler): " + " | ".join(f'"{t}"' for t in fabricated)
+        )
+
+    fabricated_rules = unsupported_rule_citations(evidence_block, feedback_items)
+    if fabricated_rules:
+        raise PromptRejected(
+            "uydurma kural kanıtı: " + " | ".join(f'"{t}"' for t in fabricated_rules)
         )
 
 
@@ -462,6 +509,7 @@ Bu feedback'lere dayanarak promptu güncelle. Özellikle:
   bu tür haberlerin eşiği geçeceği şekilde düzelt (eleme hatası, seçme hatası kadar önemli)
 - Puanlama kurallarını daha isabetli hale getir
 - Başarılı seçimleri few-shot örnek olarak ekle (maksimum 3 örnek)
+- Yeni/değişen her kural için ===KANIT=== bölümünde gerçek bir feedback başlığına atıf yap
 - Kübra'nın Dijital Ekipler / Üst Yönetim ayrımından kriter çıkar ve HEDEF KİTLE
   TAHMİNİ bölümünü güncelle; ⚡ UYUŞMAZLIK işaretli örnekler en değerli sinyaldir
 - Sektörel/bankacılık bakış açısı talimatlarını güçlendir"""
@@ -526,16 +574,21 @@ def run_optimization() -> str:
     )
 
     # Scan for the text block — a thinking block can come first.
-    new_prompt = next(
+    raw_response = next(
         (b.text for b in response.content if getattr(b, "type", None) == "text"), ""
     ).strip()
-    if not new_prompt:
+    if not raw_response:
         raise RuntimeError("Model boş prompt döndürdü — güncelleme yapılmadı.")
+
+    new_prompt, evidence_block = split_evidence(raw_response)
 
     # 4. Guardrails — never overwrite a working prompt with a broken one.
     if response.stop_reason == "max_tokens":
         raise PromptRejected("yanıt max_tokens sınırına çarptı (kesik)")
-    validate_prompt(new_prompt, current_prompt, items)
+    validate_prompt(new_prompt, current_prompt, items, evidence_block)
+    n_citations = len(_CITATION_QUOTE.findall(evidence_block))
+    if n_citations:
+        print(f"   📎 {n_citations} kural kanıt atfı doğrulandı (gerçek feedback başlıklarına dayanıyor).")
 
     print("\n🧪 Davranış testi (golden set)...")
     behavioural_check(new_prompt)
