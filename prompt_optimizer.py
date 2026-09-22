@@ -7,6 +7,7 @@ asks Claude to analyze patterns and rewrite the scoring prompt.
 
 import os
 import json
+import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -309,7 +310,26 @@ def audience_check(new_prompt: str, current_prompt: str) -> None:
         )
 
 
-def validate_prompt(new_prompt: str, current_prompt: str) -> None:
+# Matches "Örnek 1 — "..."" and "Örnek 4a (ELENMELİ) — "..."" alike.
+_EXAMPLE_QUOTE = re.compile(r'Örnek\s+\d+[a-z]?\s*(?:\([^)]*\))?\s*—\s*"([^"]{10,200})"')
+
+
+def unsupported_examples(new_prompt: str, current_prompt: str, feedback_items: list[dict]) -> list[str]:
+    """Few-shot example headlines in the rewrite that cite no real article.
+
+    The optimizer is told to pull few-shot examples from real feedback (see
+    _build_optimizer_prompt), but nothing stopped it from inventing a
+    plausible-sounding headline instead of citing one — the same failure mode
+    grounding.py catches in the daily analysis text, here in the optimizer's
+    own output. A title counts as real if it's in this cycle's feedback or was
+    already an example before the rewrite (kept from an earlier, already-
+    grounded cycle, possibly older than LOOKBACK_DAYS now).
+    """
+    known = {i["title"] for i in feedback_items} | set(_EXAMPLE_QUOTE.findall(current_prompt))
+    return [ex for ex in _EXAMPLE_QUOTE.findall(new_prompt) if ex not in known]
+
+
+def validate_prompt(new_prompt: str, current_prompt: str, feedback_items: list[dict]) -> None:
     """Reject a rewritten prompt that would degrade the digest.
 
     Raises PromptRejected with the reason. The caller keeps the existing prompt.
@@ -339,6 +359,12 @@ def validate_prompt(new_prompt: str, current_prompt: str) -> None:
     if len(new_prompt) < len(current_prompt) * 0.5:
         raise PromptRejected(
             f"asiri kisalmis: {len(new_prompt)} < mevcut {len(current_prompt)} / 2"
+        )
+
+    fabricated = unsupported_examples(new_prompt, current_prompt, feedback_items)
+    if fabricated:
+        raise PromptRejected(
+            "uydurma few-shot örnek(ler): " + " | ".join(f'"{t}"' for t in fabricated)
         )
 
 
@@ -490,7 +516,11 @@ def run_optimization() -> str:
 
     response = client.messages.create(
         model=llm.model("deep"),
-        max_tokens=16000,
+        # 16000 wasn't enough headroom once feedback volume grew (113 records on
+        # 2026-09-21): the rewrite kept hitting stop_reason="max_tokens" mid-prompt
+        # and getting rejected three runs in a row. MAX_PROMPT_CHARS caps the
+        # output at 25000 chars (~7-8K tokens), so this leaves real margin.
+        max_tokens=32000,
         system=OPTIMIZER_SYSTEM,
         messages=[{"role": "user", "content": user_msg}],
     )
@@ -505,7 +535,7 @@ def run_optimization() -> str:
     # 4. Guardrails — never overwrite a working prompt with a broken one.
     if response.stop_reason == "max_tokens":
         raise PromptRejected("yanıt max_tokens sınırına çarptı (kesik)")
-    validate_prompt(new_prompt, current_prompt)
+    validate_prompt(new_prompt, current_prompt, items)
 
     print("\n🧪 Davranış testi (golden set)...")
     behavioural_check(new_prompt)
