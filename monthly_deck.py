@@ -15,6 +15,7 @@ Usage:
     python3 monthly_deck.py                  # current coverage window
     python3 monthly_deck.py --sample         # layout test from recent selected articles
     python3 monthly_deck.py --out path.pptx
+    python3 monthly_deck.py --ci             # no-op unless today is this month's send_date()
 """
 
 import copy
@@ -495,13 +496,22 @@ def main() -> int:
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).parent / ".env")
 
+    today = date.today()
+
+    # The workflow runs every Wednesday (cron can't express "the Wednesday of the
+    # week containing the month's last Friday" directly) and relies on this to
+    # no-op on the other three — send_date() is the one place that rule lives.
+    if "--ci" in sys.argv and today != send_date(today.year, today.month):
+        print(f"⏭️  Bugün ({today}) bu ayın gönderim günü değil "
+              f"({send_date(today.year, today.month)}) — atlanıyor.")
+        return 0
+
     template = Path(os.environ.get("DECK_TEMPLATE_PATH", ""))
     if not template.is_file():
         print("❌ DECK_TEMPLATE_PATH ayarlı değil veya dosya yok.")
         return 1
 
     sample = "--sample" in sys.argv
-    today = date.today()
     after, through = coverage_window(today)
     month_label = f"{MONTHS_TR[through.month - 1]} {through.year}"
 

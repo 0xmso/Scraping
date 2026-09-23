@@ -1,0 +1,84 @@
+name: Monthly Now & Next Deck
+
+# Runs every Wednesday; monthly_deck.py --ci no-ops unless today is this
+# month's send_date() (Wednesday of the week containing the last Friday).
+# Cron can't express that rule directly, so the script is the source of truth.
+on:
+  schedule:
+    - cron: "0 10 * * 3"   # 13:00 TSİ (UTC+3), every Wednesday
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # for aws-actions/configure-aws-credentials (OIDC, no long-lived keys)
+  contents: read
+
+jobs:
+  build-deck:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install feedparser notion-client 'anthropic[bedrock]>=0.125' python-dotenv httpx trafilatura lxml_html_clean python-pptx
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DECK_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      # Template is never committed (public repo, internal branding) — it lives
+      # in a private S3 bucket the team updates by hand when the deck design changes.
+      - name: Fetch deck template from S3
+        run: |
+          mkdir -p template
+          aws s3 cp "s3://${{ vars.DECK_S3_BUCKET }}/template/current.pptx" "template/current.pptx"
+
+      - name: Run monthly deck generator
+        env:
+          AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.AWS_BEARER_TOKEN_BEDROCK }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_ARTICLES_DB_ID: ${{ secrets.NOTION_ARTICLES_DB_ID }}
+          DECK_TEMPLATE_PATH: template/current.pptx
+        run: python3 monthly_deck.py --ci
+
+      # Output is just as internal as the template, so it goes back to the same
+      # private bucket — a public repo's workflow artifacts are downloadable by
+      # anyone who can see the repo, which a finished branded deck must not be.
+      - name: Upload generated deck to S3
+        run: |
+          shopt -s nullglob
+          files=(out/*.pptx)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "Bugün üretim günü değildi, yüklenecek dosya yok."
+          else
+            aws s3 cp "${files[0]}" "s3://${{ vars.DECK_S3_BUCKET }}/output/$(basename "${files[0]}")"
+            echo "Yüklendi: s3://${{ vars.DECK_S3_BUCKET }}/output/$(basename "${files[0]}")"
+          fi
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # One open issue at a time — reopen/comment instead of filing a new
+          # one on every failed run.
+          existing=$(gh issue list --label automation-failure --state open \
+            --search "Monthly Now & Next Deck in:title" --json number -q '.[0].number')
+          body="Çalışma başarısız: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create \
+              --title "Monthly Now & Next Deck başarısız oluyor" \
+              --label automation-failure \
+              --body "$body"
+          fi
